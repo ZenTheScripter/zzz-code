@@ -27,7 +27,10 @@ Layout it expects next to itself:
     ZzZ Code.bat
     patch_desktop.py            <- desktop asar art, apply/restore lifecycle
     zzz_patch.py                <- CLI binary wordmark
-    recovered_src/*.py          <- ouc_common, zen_proxy, zen_lane, ...
+    ouc_common.py, zen_proxy.py, zen_lane.py, ...   <- lane, WARP and guard modules
+    ui/index.html               <- Control Center page
+    assets/zzz.ico              <- window icon
+    jailbreaks/AGENTS.md        <- abliterated sheet source (fetched, not bundled)
 
 Self-dispatch flags (internal, used for elevated/detached work):
 
@@ -115,13 +118,13 @@ GUARD_MUTEX = "OpencodeUnlimitedGuard"
 
 
 def _bootstrap_path() -> None:
-    """Make the recovered OpenCode-Unlimited modules importable."""
+    """Put the lane, WARP and guard modules on sys.path."""
     roots = []
     if FROZEN:
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
-            roots.append(Path(meipass) / "recovered_src")
-    roots.append(APP_ROOT / "recovered_src")
+            roots.append(Path(meipass))
+    roots.append(APP_ROOT)
     for root in roots:
         if root.is_dir() and str(root) not in sys.path:
             sys.path.insert(0, str(root))
@@ -2617,7 +2620,8 @@ def _stage_sources(archive: Path, commit: str) -> tuple[bool, str]:
     if FROZEN:
         return True, "sources staged at %s" % root
     copied = 0
-    for pattern in ("*.py", "recovered_src/*.py", "requirements.txt", "README.md"):
+    for pattern in ("*.py", "requirements.txt", "README.md", "CREDITS.md",
+                    "THEMES.md", "BUILD.md", "ui/index.html"):
         for src in root.glob(pattern):
             target = APP_ROOT / src.relative_to(root)
             try:

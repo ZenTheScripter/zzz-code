@@ -5,13 +5,13 @@ import os
 # source root is whichever directory actually holds the launcher.
 HERE = os.path.dirname(os.path.abspath(SPECPATH))
 ROOT = HERE if os.path.isfile(os.path.join(HERE, "zzzcode_app.py")) else os.path.dirname(HERE)
-SRC = os.path.join(ROOT, "recovered_src")
+SRC = ROOT
 
 a = Analysis(
     [os.path.join(ROOT, 'zzzcode_app.py')],
-    pathex=[SRC, ROOT],
+    pathex=[ROOT],
     binaries=[],
-    datas=[],
+    datas=[("ui/index.html", "ui"), ("assets/zzz.ico", "assets")],
     hiddenimports=['ouc_common', 'zen_proxy', 'zen_lane', 'warp_keeper', 'zen_guard',
                    'ouc_firewall', 'doctor', 'zen_hop', 'zzz_patch', 'patch_desktop',
                    'patch_gui', 'proxy_chain', 'tor_manager', 'clean_endpoint',

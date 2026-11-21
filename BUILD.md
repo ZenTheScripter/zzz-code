@@ -20,7 +20,7 @@ python build.py --onedir     folder build instead of a single file
 ## What the spec collects
 
 - `zzzcode_app.py` as the entry script,
-- `pathex` = this folder + `recovered_src`,
+- `pathex` = this folder (every module sits next to the launcher),
 - `hiddenimports` for every module the launcher imports lazily
   (`warp_keeper`, `zen_guard`, `zen_lane`, `zen_proxy`, `ouc_common`,
   `ouc_firewall`, `zen_hop`, `doctor`, `zzz_patch`, `patch_desktop`,
