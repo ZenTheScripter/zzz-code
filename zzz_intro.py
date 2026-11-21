@@ -1,10 +1,11 @@
 """Console intro and menu animation for the ZzZ Code launcher.
 
-Three stages, in order:
+Stages, in order:
 
-1. `matrix_rain()`      green code rain filling the console
-2. `wordmark()`         the "MADE BY ZZZ" block art
-3. `sweep()`            a bright band running across that art, left to right
+1. `rain_reveal()`  green rain that carves "MADE BY ZZZ" out of the field, one
+                    column at a time, then drains and leaves the art behind
+2. `word_glow()`    a band of light crossing that art while it breathes
+3. `menu_banner()`  the travelling rule and decoding tagline above a menu page
 
 Everything is opt-in and bounded: `enabled()` is False when stdout is not a TTY,
 when `ZZZ_NO_ANIM=1` is set, or when the console refused VT (Windows 10 older
@@ -15,6 +16,7 @@ its duration, so a slow terminal cannot stretch the boot into a hang.
 
 from __future__ import annotations
 
+import math
 import os
 import random
 import shutil
@@ -73,6 +75,9 @@ RAIN_GLYPHS = "01<>[]{}/\\|=+-*#$%&@;:!?0123456789"
 WORD_RAMP = ("28", "34", "40", "46", "46", "46", "82")
 SWEEP_COLOR = "231"
 BASE_COLOR = "22"
+
+# Printed above every menu page once the boot animation has had its run.
+MENU_TAGLINE = "abliterated sheet  \u00b7  35 themes  \u00b7  warp lane  \u00b7  self update"
 
 
 def _c(code: str, text: str) -> str:
@@ -269,6 +274,299 @@ def matrix_rain(duration: float = 2.4, fps: int = 24) -> None:
             out.write("\x1b[H" + "\n".join(lines) + "\x1b[0m")
             out.flush()
             time.sleep(delay)
+    finally:
+        out.write("\x1b[0m\x1b[?25h")
+        out.flush()
+
+
+# ------------------------------------------------------------- rain reveal
+
+
+def _place(art_rows: list[str], cols: int, rows: int) -> tuple[int, int]:
+    """Where the word sits: centred on both axes, one row below dead centre."""
+    width = max((len(r) for r in art_rows), default=1)
+    left = max(0, (cols - width) // 2)
+    top = max(1, (rows - len(art_rows)) // 2 + 1)
+    if top + len(art_rows) > rows - 1:
+        top = max(1, rows - 1 - len(art_rows))
+    return left, top
+
+
+def _pack(chars: list[tuple[str, str | None]]) -> str:
+    """Join (char, colour) pairs into colour runs."""
+    chunks: list[str] = []
+    run, run_color = "", None
+    for ch, color in chars:
+        if color != run_color:
+            if run:
+                chunks.append(_c(run_color, run) if run_color else run)
+            run, run_color = "", color
+        run += ch
+    if run:
+        chunks.append(_c(run_color, run) if run_color else run)
+    return "".join(chunks)
+
+
+def rain_reveal(
+    word: str = "MADE BY ZZZ", duration: float = 3.6, fps: int = 24
+) -> tuple[list[str], int, int] | None:
+    """Rain that carves `word` out of the field, column by column.
+
+    A column's letter cells lock the moment its drop passes the word band, so the
+    art assembles left to right inside the falling code instead of fading in as a
+    separate layer. The last third drains: drops stop respawning, trails collapse,
+    and what is left standing is the word, centred in the lower half of the
+    console with the empty rain above it.
+
+    Returns the plain art rows and their origin so `word_glow()` can animate the
+    same art in place, or None when animations are off.
+    """
+    art_rows = art(word)
+    if not enabled():
+        for line in tinted(word):
+            print("   " + line)
+        return None
+
+    w, h = size()
+    cols = max(24, min(w - 1, 150))
+    rows = max(12, h - 2)
+    count = len(art_rows)
+    width = max((len(r) for r in art_rows), default=1)
+    left, top = _place(art_rows, cols, rows)
+
+    frames = max(1, min(int(duration * fps), 200))
+    delay = 1.0 / max(1, fps)
+    drain = frames * 2 // 3
+    band_bottom = top + count            # the row the first letter needs cleared
+
+    rng = random.Random()
+    head = [rng.randint(-rows, -1) for _ in range(cols)]
+    speed = [rng.choice((1, 1, 2, 2, 3)) for _ in range(cols)]
+    trail = [rng.randint(6, max(9, rows // 2)) for _ in range(cols)]
+    # Deepest row each column's drop has ever reached. A letter cell is carved
+    # once its own row is at or above that mark, so the art grows behind the
+    # drops instead of switching on all at once, and never un-carves when the
+    # column dies.
+    reached = [-(10 ** 6)] * cols
+    cells = [[" "] * cols for _ in range(rows)]
+    ramp = ("22", "22", "28", "34", "40", "46", "231")
+    lead = ("231", "46", "40")
+
+    out = sys.stdout
+    out.write("\x1b[?25l\x1b[2J\x1b[H")
+    out.flush()
+    try:
+        for frame in range(frames):
+            for c in range(cols):
+                if frame >= drain:
+                    if reached[c] < band_bottom:
+                        # Drain phase: hurry the stragglers down through the word
+                        # so every column has carved its letters before the rain
+                        # stops.
+                        head[c] = max(head[c], 0) + 5
+                    else:
+                        # Carved: run the drop out of the frame and collapse the
+                        # trail behind it, which is what leaves the art clean.
+                        head[c] += 5
+                        trail[c] = max(1, trail[c] - 2)
+                else:
+                    head[c] += speed[c]
+                if head[c] > reached[c]:
+                    reached[c] = head[c]
+                if head[c] - trail[c] > rows:
+                    if frame >= drain:
+                        head[c] = -(10 ** 6)      # out of play, never respawns
+                    else:
+                        head[c] = rng.randint(-2 * rows, 0)
+                        speed[c] = rng.choice((1, 1, 2, 2, 3))
+                        trail[c] = rng.randint(6, max(9, rows // 2))
+
+            for r in range(rows):
+                row_cells = cells[r]
+                for c in range(cols):
+                    dist = head[c] - r
+                    if 0 <= dist < trail[c]:
+                        if row_cells[c] == " " or rng.random() < 0.04:
+                            row_cells[c] = rng.choice(RAIN_GLYPHS)
+                    else:
+                        row_cells[c] = " "
+
+            lines: list[str] = []
+            for r in range(rows):
+                row_cells = cells[r]
+                band_row = r - top
+                art_line = art_rows[band_row] if 0 <= band_row < count else ""
+                pair: list[tuple[str, str | None]] = []
+                for c in range(cols):
+                    x = c - left
+                    if (
+                        art_line
+                        and 0 <= x < len(art_line)
+                        and art_line[x] != " "
+                        and reached[c] >= r
+                    ):
+                        # How far the drop has run past this cell: bright right
+                        # behind the head, cooling as the trail falls away.
+                        age = reached[c] - r
+                        if age <= 2:
+                            color = "231"
+                        elif age <= 7:
+                            color = "82"
+                        elif age <= 14:
+                            color = "46"
+                        elif (frame // 4 + x + r) % 11 == 0:
+                            color = "82"
+                        else:
+                            color = "40"
+                        pair.append((art_line[x], color))
+                        continue
+                    ch = row_cells[c]
+                    if ch == " ":
+                        pair.append((" ", None))
+                        continue
+                    dist = head[c] - r
+                    if dist < len(lead):
+                        pair.append((ch, lead[dist]))
+                    else:
+                        pair.append((ch, ramp[min(len(ramp) - 1, 2 + (dist - 2) // 2)]))
+                lines.append(_pack(pair))
+
+            out.write("\x1b[H" + "\n".join(lines) + "\x1b[0m")
+            out.flush()
+            time.sleep(delay)
+
+        out.write("\x1b[%d;%dH\x1b[0m\n" % (top + count + 1, 1))
+        out.flush()
+    finally:
+        out.write("\x1b[0m\x1b[?25h")
+        out.flush()
+    return art_rows, left, top
+
+
+def word_glow(
+    art_rows: list[str], left: int, top: int, cycles: float = 2.0, delay: float = 0.028
+) -> None:
+    """A band of light crosses the standing word while it breathes.
+
+    Absolute cursor addressing keeps the art where the rain left it, so the glow
+    reads as the same object being lit rather than a second drawing.
+    """
+    if not enabled() or not art_rows:
+        return
+    width = max((len(r) for r in art_rows), default=1)
+    frames = max(8, min(int(18 * cycles), 64))
+    out = sys.stdout
+    out.write("\x1b[?25l")
+    try:
+        for frame in range(frames):
+            band = -8.0 + (width + 16.0) * frame / max(1, frames - 1)
+            pulse = 0.5 - 0.5 * math.cos(frame / 2.6)
+            for i, line in enumerate(art_rows):
+                pair: list[tuple[str, str | None]] = []
+                for x, ch in enumerate(line):
+                    if ch == " ":
+                        pair.append((" ", None))
+                        continue
+                    d = abs(x - band)
+                    if d < 1.5:
+                        color = "231"
+                    elif d < 4.5:
+                        color = "82"
+                    elif d < 9.0:
+                        color = "46"
+                    else:
+                        color = "46" if pulse > 0.45 else "40"
+                    pair.append((ch, color))
+                out.write("\x1b[%d;%dH%s" % (top + i + 1, left + 1, _pack(pair)))
+            out.write("\x1b[0m")
+            out.flush()
+            time.sleep(delay)
+
+        for i, line in enumerate(art_rows):
+            pair = [(ch, WORD_RAMP[min(len(WORD_RAMP) - 1, x * len(WORD_RAMP) // max(1, width))]
+                     if ch != " " else None) for x, ch in enumerate(line)]
+            out.write("\x1b[%d;%dH%s" % (top + i + 1, left + 1, _pack(pair)))
+        out.write("\x1b[0m\n")
+        out.flush()
+    finally:
+        out.write("\x1b[0m\x1b[?25h")
+        out.flush()
+
+
+def intro_sequence(word: str = "MADE BY ZZZ", duration: float = 3.6, fps: int = 24) -> None:
+    """Rain reveal, then the light crossing the art it left behind."""
+    geometry = rain_reveal(word, duration=duration, fps=fps)
+    if geometry:
+        word_glow(*geometry)
+
+
+# ------------------------------------------------------------- menu banner
+
+
+def _wave(width: int, head: float) -> str:
+    """A rule with a bright head running along it, gradient trailing both ways."""
+    pair: list[tuple[str, str]] = []
+    for x in range(width):
+        d = abs(x - head)
+        if d < 2.0:
+            color = "231"
+        elif d < 5.0:
+            color = "82"
+        elif d < 9.0:
+            color = "46"
+        elif d < 14.0:
+            color = "34"
+        else:
+            color = "22"
+        pair.append(("\u2500", color))
+    return _pack(pair)
+
+
+def menu_banner(tagline: str = MENU_TAGLINE, width: int = 0, indent: int = 2, animate: bool = True) -> None:
+    """Travelling rule plus a tagline that decodes, printed above a menu page.
+
+    Static on every repaint except the first few after boot, so navigation stays
+    instant and the movement only happens when it is worth watching.
+    """
+    width = width or len(tagline)
+    try:
+        avail = max(20, size()[0] - indent - 1)
+    except Exception:
+        avail = 78
+    if width > avail:
+        width = avail
+    if len(tagline) > avail:
+        tagline = tagline[: max(0, avail - 1)].rstrip(" .")
+    pad = " " * indent
+    if not animate or not enabled():
+        print(pad + _c("22", "\u2500" * width))
+        print(pad + _c("46", tagline))
+        return
+
+    out = sys.stdout
+    frames = 16
+    out.write("\x1b[?25l")
+    try:
+        for f in range(frames):
+            head = -6.0 + (width + 12.0) * f / max(1, frames - 1)
+            out.write("\r" + pad + _wave(width, head))
+            out.flush()
+            time.sleep(0.018)
+        out.write("\r" + pad + _c("22", "\u2500" * width) + "\n")
+
+        rng = random.Random()
+        glyphs = "01<>[]{}/\\|=+-*#$%&;:!?"
+        for frame in range(5):
+            locked = len(tagline) * frame // 5
+            text = "".join(
+                ch if x < locked or ch == " " else rng.choice(glyphs)
+                for x, ch in enumerate(tagline)
+            )
+            out.write("\r" + pad + _c("46", text))
+            out.flush()
+            time.sleep(0.028)
+        out.write("\r" + pad + _c("46", tagline) + "\n")
+        out.flush()
     finally:
         out.write("\x1b[0m\x1b[?25h")
         out.flush()

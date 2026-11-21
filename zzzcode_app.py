@@ -453,7 +453,7 @@ def working(label: str, seconds: float = 0.45, detail: str = "") -> None:
 # --------------------------------------------------------------------- pages
 
 PANEL_INNER = 58
-_MENU_ANIM = {"left": 2}   # how many more menu paints get the typewriter reveal
+_MENU_ANIM = {"left": 3}   # menu paints still allowed to animate before settling
 
 
 def _panel_rows(title: str, rows: list[tuple[str, str, str, str]]) -> list[str]:
@@ -506,15 +506,27 @@ def _wordmark_rows() -> list[str]:
 
 
 def heading(title: str, sub: str = "") -> None:
-    """Clear glass, repaint the wordmark, then the page title.
+    """Clear glass, repaint the wordmark, then the animated banner and the title.
 
-    The animation runs once at boot; every page after that gets the same
-    wordmark instantly, so navigating never re-triggers the intro.
+    The intro runs once at boot; every page after that gets the same wordmark
+    instantly. The banner above the panel animates on the first couple of paints
+    and lands static afterwards, so navigating never re-triggers the intro.
     """
     clear_screen()
     print()
     for line in _wordmark_rows():
         print("   " + line)
+    print()
+    animate = False
+    try:
+        import zzz_intro
+
+        if _MENU_ANIM["left"] > 0 and _intro_available() and zzz_intro.enabled():
+            _MENU_ANIM["left"] -= 1
+            animate = True
+        zzz_intro.menu_banner(animate=animate)
+    except Exception:
+        pass
     print()
     line = "  " + c_bold(c_white(title.upper()))
     if sub:
@@ -535,12 +547,13 @@ def panel(title: str, rows: list[tuple[str, str, str, str]]) -> None:
         try:
             import zzz_intro
 
-            plain = [_ANSI.sub("", line) for line in lines]
-            zzz_intro.decode_lines(plain, delay=0.014, passes=4)
-            print("\x1b[%dA" % max(0, len(plain) - 1), end="")
-            for line in lines:
-                print(line)
-            return
+            if zzz_intro.enabled():
+                plain = [_ANSI.sub("", line) for line in lines]
+                zzz_intro.decode_lines(plain, delay=0.014, passes=4)
+                print("\x1b[%dA" % max(0, len(plain) - 1), end="")
+                for line in lines:
+                    print(line)
+                return
         except Exception:
             pass
     for line in lines:
@@ -3895,16 +3908,14 @@ def intro() -> None:
         import zzz_intro
 
         if zzz_intro.enabled():
-            zzz_intro.matrix_rain(duration=2.4, fps=24)
+            zzz_intro.intro_sequence("MADE BY ZZZ")
+            # Hold the finished art for a beat: the rain is gone, the word sits
+            # there lit, then the glass clears for the boot log.
+            time.sleep(0.7)
             clear_screen()
             print()
-        zzz_intro.sweep("MADE BY ZZZ", step=3, delay=0.018, indent=3)
-        print()
-        if zzz_intro.enabled():
-            # Hold the wordmark for a beat, then clear so the boot log and the
-            # menu land on clean glass instead of on top of the art.
-            time.sleep(0.8)
-            clear_screen()
+        else:
+            zzz_intro.sweep("MADE BY ZZZ", step=3, delay=0.018, indent=3)
             print()
     except Exception:
         # A console that refuses cursor moves must not take the boot with it.
@@ -3999,16 +4010,10 @@ def boot() -> None:
 
 
 def main_menu() -> None:
-    # The first paint lands under the intro's wordmark instead of clearing it,
-    # so the eye reads one continuous sequence: rain, art, status, menu.
-    first = True
+    # Every page clears and repaints itself, intro included: the boot art has
+    # already been retired by the time this loop starts.
     while True:
-        if first:
-            print()
-            print("  " + c_bold(c_white("MAIN")) + "   " + c_dim("console runtime"))
-            first = False
-        else:
-            heading("Main", "console runtime")
+        heading("Main", "console runtime")
         panel(
             "MENU",
             [
