@@ -244,6 +244,21 @@ def c_bold(t):
     return _p("1", t)
 
 
+# Matrix ladder. One hue, five rungs: the border is almost black-green, the
+# accent is the neon, and nothing on a page leaves that ramp. Cyan, magenta and
+# amber still exist for state, but a menu row never uses them.
+def c_lime(t):
+    return _p("38;5;118", t)
+
+
+def c_ash(t):
+    return _p("38;5;242", t)
+
+
+def c_slate(t):
+    return _p("38;5;238", t)
+
+
 # ---------------------------------------------------------------------- art
 
 # 5x7 cap bitmap, one column of gutter between glyphs, rendered as four text
@@ -368,20 +383,24 @@ def banner_lines(word: str = "ZZZ CODE") -> list[str]:
     return _BANNER_CACHE
 
 
+MARGIN = "  "
+
+
 def print_banner(word: str = "ZZZ CODE") -> None:
     """Clear the console and paint the wordmark plus the runtime line."""
     clear_screen()
     print()
     for line in banner_lines(word):
-        print("   " + line)
+        print(MARGIN + line)
     print()
     print(
-        "   "
+        MARGIN
+        + c_lime("\u258c ")
         + c_dim("console runtime")
         + c_faint("  \u00b7  ")
-        + c_dim(_runtime_version())
+        + c_ash(_runtime_version())
         + c_faint("  \u00b7  ")
-        + c_dim(_art_state_line())
+        + c_ash(_art_state_line())
     )
     print()
 
@@ -432,9 +451,10 @@ SPIN = "|/-\\"
 
 
 def step(label: str, ok: bool = True, detail: str = "") -> None:
-    mark = c_green("\u2713") if ok else c_yellow("!")
-    tail = ("  " + c_dim(detail)) if detail else ""
-    print("   %s %s%s" % (mark, label, tail))
+    """One boot line: a state mark, a label, and its reason in the ash column."""
+    mark = c_lime("\u2713") if ok else c_yellow("!")
+    tail = ("  " + c_ash(detail)) if detail else ""
+    print("%s%s %s%s" % (MARGIN, mark, c_white(label) if not ok else label, tail))
 
 
 def working(label: str, seconds: float = 0.45, detail: str = "") -> None:
@@ -444,42 +464,57 @@ def working(label: str, seconds: float = 0.45, detail: str = "") -> None:
         return
     frames = max(1, int(seconds / 0.06))
     for i in range(frames):
-        sys.stdout.write("\r   %s %s " % (c_green(SPIN[i % len(SPIN)]), label))
+        sys.stdout.write("\r%s%s %s " % (MARGIN, c_lime(SPIN[i % len(SPIN)]), label))
         sys.stdout.flush()
         time.sleep(0.06)
-    sys.stdout.write("\r   %s %s%s\n" % (c_green("\u2713"), label, ("  " + c_dim(detail)) if detail else ""))
+    sys.stdout.write(
+        "\r%s%s %s%s\n"
+        % (MARGIN, c_lime("\u2713"), label, ("  " + c_ash(detail)) if detail else "")
+    )
     sys.stdout.flush()
 
 
 # --------------------------------------------------------------------- pages
 
 PANEL_INNER = 58
+NOTE_MAX = 30          # widest the right column may grow before it is clamped
 _MENU_ANIM = {"left": 3}   # menu paints still allowed to animate before settling
 
 
 def _panel_rows(title: str, rows: list[tuple[str, str, str, str]]) -> list[str]:
     """Rendered panel lines, header and rows on one exact width.
 
-    Row geometry: `  │ ` (4) + content (inner) + ` │` (2) = inner + 6 columns.
-    The header and the bottom bar are built to that same total so the three
-    pieces line up to the character.
+    Geometry, in plain columns:
+        top     `┌─▓ TITLE ` + dashes + `┐`      = inner + 4
+        row     `│ ` + content (inner) + ` │`     = inner + 4
+        bottom  `└` + dashes (inner + 2) + `┘`    = inner + 4
+    Every piece is built to that total, so the three line up to the character
+    at any title length.
     """
     inner = PANEL_INNER
-    out = []
-    pad = max(0, inner - len(title) - 1)
-    out.append(c_faint("  \u250c\u2500 ") + c_bold(c_magenta(title)) + c_faint(" " + "\u2500" * pad + "\u2510"))
+    label = title.upper()
+    fill = max(0, inner - 3 - len(label))
+    out = [
+        MARGIN
+        + c_faint("\u250c\u2500")
+        + c_lime("\u2593")
+        + c_faint(" ")
+        + c_bold(c_lime(label))
+        + c_faint(" " + "\u2500" * fill + "\u2510")
+    ]
     for left_plain, left_color, right_plain, right_color in rows:
         gap = inner - len(left_plain) - len(right_plain)
-        if gap < 1:
-            gap = 1
+        if gap < 0:
+            gap = 0
         out.append(
-            c_faint("  \u2502 ")
+            MARGIN
+            + c_faint("\u2502 ")
             + left_color
             + " " * gap
             + right_color
             + c_faint(" \u2502")
         )
-    out.append(c_faint("  \u2514" + "\u2500" * (inner + 2) + "\u2518"))
+    out.append(MARGIN + c_faint("\u2514" + "\u2500" * (inner + 2) + "\u2518"))
     return out
 
 
@@ -516,7 +551,7 @@ def heading(title: str, sub: str = "") -> None:
     clear_screen()
     print()
     for line in _wordmark_rows():
-        print("   " + line)
+        print(MARGIN + line)
     print()
     animate = False
     try:
@@ -529,9 +564,9 @@ def heading(title: str, sub: str = "") -> None:
     except Exception:
         pass
     print()
-    line = "  " + c_bold(c_white(title.upper()))
+    line = MARGIN + c_lime("\u258c ") + c_bold(c_white(title.upper()))
     if sub:
-        line += "   " + c_dim(sub)
+        line += c_faint("  \u00b7  ") + c_dim(sub)
     print(line)
 
 
@@ -564,13 +599,14 @@ _ANSI = re.compile("\\x1b\\[[0-9;]*m")
 def _fit_note(left_plain: str, note: str) -> str:
     """Clamp the right column so the panel keeps one column of breathing room.
 
-    A note longer than the gap used to push the right border out by however many
-    characters it ran over; paths and proxy details are the usual offenders.
+    The note column is capped as well. `keeper \u00b7 guard \u00b7 proxy \u00b7 stealth`
+    used to run right up against its label, so the second column started at a
+    different place on every row; capped, the notes read as one flush block.
     """
-    room = max(4, PANEL_INNER - len(left_plain) - 1)
+    room = max(4, min(PANEL_INNER - len(left_plain) - 2, NOTE_MAX))
     if len(note) <= room:
         return note
-    return note[: room - 2] + ".."
+    return note[: room - 2].rstrip() + ".."
 
 
 def row(num: str, label: str, on: bool | None = None, note: str = "") -> tuple[str, str, str, str]:
@@ -581,7 +617,7 @@ def row(num: str, label: str, on: bool | None = None, note: str = "") -> tuple[s
     instead of losing the reason it is off.
     """
     left_plain = "[%s] %s" % (num, label)
-    left_color = c_cyan("[%s]" % num) + " " + c_white(label)
+    left_color = c_lime("[%s]" % num) + " " + c_white(label)
     if on is not None and note:
         text = _fit_note(left_plain, ("\u25cf " if on else "\u25cb ") + note)
         head, body = text[:2], text[2:]
@@ -589,19 +625,31 @@ def row(num: str, label: str, on: bool | None = None, note: str = "") -> tuple[s
             left_plain,
             left_color,
             text,
-            (c_green(head) if on else c_faint(head)) + c_dim(body),
+            (c_lime(head) if on else c_slate(head)) + c_ash(body),
         )
     if on is not None:
         chip = "\u25cf ON" if on else "\u25cb off"
-        return left_plain, left_color, chip, (c_green(chip) if on else c_faint(chip))
+        return left_plain, left_color, chip, (c_lime(chip) if on else c_slate(chip))
     if note:
         text = _fit_note(left_plain, note)
-        return left_plain, left_color, text, c_dim(text)
+        return left_plain, left_color, text, c_ash(text)
     return left_plain, left_color, "", ""
 
 
 def spacer() -> tuple[str, str, str, str]:
     return "", "", "", ""
+
+
+def group(label: str) -> tuple[str, str, str, str]:
+    """A divider row: `▸ label` and a rule that runs to the right border.
+
+    Sectioning beats a taller list of equal rows: the eye files the page into
+    run / maintain / leave without reading a word of the notes.
+    """
+    text = "\u25b8 " + label.lower()
+    rule = "\u2500" * max(0, PANEL_INNER - len(text) - 1)
+    plain = text + " " + rule
+    return plain, c_faint("\u25b8 ") + c_slate(label.lower()) + c_slate(" " + rule), "", ""
 
 
 def footer(keys: str, hint: str = "") -> None:
@@ -612,7 +660,7 @@ def footer(keys: str, hint: str = "") -> None:
     """
     print()
     if hint:
-        print("  " + c_faint(hint))
+        print(MARGIN + c_faint(hint))
 
 
 # ------------------------------------------------------------ state probes
@@ -3147,9 +3195,9 @@ def launch_desktop() -> None:
         print()
         step("OpenCode Desktop is already running", ok=False,
              detail="%d process(es) - the bundle is rewritten at launch" % len(pids))
-        print("  " + c_dim("the patch cannot land on a bundle that is in use"))
-        print("  " + c_dim("k closes it and relaunches with the patch"))
-        print("  " + c_dim("any other key goes back to the menu"))
+        print(MARGIN + c_dim("the patch cannot land on a bundle that is in use"))
+        print(MARGIN + c_ash("k closes it and relaunches with the patch"))
+        print(MARGIN + c_ash("any other key goes back to the menu"))
         print()
         if _prompt("k") != "k":
             return
@@ -3220,7 +3268,7 @@ def launch_desktop() -> None:
 
     ok, msg = _recycle_service()
     step(msg, ok=ok)
-    step("egress %s" % (get_egress_v6(timeout=6.0, direct=True) or "unverified"))
+    step("egress %s" % (get_egress_v6(timeout=6.0) or "unverified"))
 
     proxy = "http://127.0.0.1:%d" % keeper_port()
     env = os.environ.copy()
@@ -3261,7 +3309,7 @@ def launch_desktop() -> None:
              detail="run Restore vanilla when you close the app")
 
     print()
-    print("   " + c_dim("desktop is up \u00b7 projects load from opencode.db"))
+    print(MARGIN + c_dim("desktop is up \u00b7 projects load from opencode.db"))
 
 
 def launch_cli() -> None:
@@ -3344,11 +3392,11 @@ def launch_cli() -> None:
         srv.server_close()
         park_ok, park_msg = warp_park()
         if not park_ok:
-            print("   " + c_dim("tunnel still up \u00b7 %s" % park_msg))
+            print(MARGIN + c_dim("tunnel still up \u00b7 %s" % park_msg))
         ok, msg = inject_revert()
         if ok:
-            print("   " + c_dim("instruction feed closed \u00b7 %s" % msg))
-    print("   " + c_dim("lane closed \u00b7 proxy on 127.0.0.1:%d released" % port))
+            print(MARGIN + c_dim("instruction feed closed \u00b7 %s" % msg))
+    print(MARGIN + c_dim("lane closed \u00b7 proxy on 127.0.0.1:%d released" % port))
 
 
 # --------------------------------------------------------------- runtime staging
@@ -3484,7 +3532,7 @@ def _prompt(keys: str = "0123456789") -> str:
     falls back to line input so scripts can still drive the launcher.
     """
     shown = keys if "c" in keys else keys + " c"
-    label = "  " + c_magenta("zzz\u25b8 ") + c_faint("[%s] " % shown)
+    label = MARGIN + c_lime("zzz\u25b8 ") + c_slate("[%s] " % shown)
     if _msvcrt is not None:
         try:
             if _console_input():
@@ -3636,6 +3684,7 @@ def settings_menu() -> None:
         heading("Settings", "warp lane stack")
 
         rows = [
+            group("switches"),
             row("1", "WARP Keeper", on=keeper),
             row("2", "Zen Guard", on=guard),
             row("3", "Desktop App Proxy", on=wired, note="" if wired else "listen %s" % ("yes" if proxy else "no")),
@@ -3647,13 +3696,14 @@ def settings_menu() -> None:
             row("e", "Egress route", note=route),
             row("w", "WARP cold start", on=cold, note="no tunnel at boot" if cold else "tunnel at logon"),
             row("u", "Updates", on=ups["enabled"], note=ups["status"]),
-            spacer(),
+            group("actions"),
             row("8", "Rotate /64 now", note="manual hop"),
             row("9", "Re-roll Cloudflare edge", note=edge_rows_label()),
             row("v", "Verify stack", note="probe + auto-repair"),
+            spacer(),
             row("0", "Back"),
         ]
-        panel("TOGGLES", rows)
+        panel("SETTINGS", rows)
         footer("0123456789vj wu e c", "c repaints  \u00b7  toggles apply on the next launch")
 
         choice = _prompt("0123456789vjwue")
@@ -3849,7 +3899,7 @@ def status_page() -> None:
             if not path.is_file():
                 continue
             print()
-            print("   " + c_dim(label))
+            print(MARGIN + c_dim(label))
             for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-5:]:
                 print("     " + c_faint(line))
 
@@ -3896,7 +3946,7 @@ def vanilla_restore() -> None:
     step(msg, ok=ok)
     if ok:
         print()
-        print("   " + c_dim("opening OpenCode.exe directly now gives the stock app"))
+        print(MARGIN + c_dim("opening OpenCode.exe directly now gives the stock app"))
     print()
 
 
@@ -4199,13 +4249,13 @@ def _crash_report(exc: BaseException) -> int:
     except Exception:
         log = None
     print()
-    print("   " + c_red("launcher stopped on an internal error"))
+    print(MARGIN + c_red("launcher stopped on an internal error"))
     print()
     for line in text.rstrip().splitlines()[-12:]:
-        print("   " + line)
+        print(MARGIN + line)
     print()
     if log is not None:
-        print("   " + c_dim("full trace in %s" % log))
+        print(MARGIN + c_dim("full trace in %s" % log))
     print()
     if _console_input():
         _hold("enter closes this window")
@@ -4323,7 +4373,7 @@ def boot() -> None:
         ok, detail, _ = prepare_runtime()
         step(label, ok=ok, detail=detail)
         if not ok:
-            print("   " + c_dim("menu still opens - Repair patch retries the stage"))
+            print(MARGIN + c_dim("menu still opens - Repair patch retries the stage"))
 
     if PATCHED.is_file():
         step("Verifying wordmark", detail="ZZZ CODE")
@@ -4355,7 +4405,7 @@ def boot() -> None:
         pass
 
     print()
-    print("   " + c_bold(c_green("ZzZ Code successfully loaded ! Enjoy !")))
+    print(MARGIN + c_bold(c_green("ZzZ Code successfully loaded ! Enjoy !")))
     print()
 
 
@@ -4368,13 +4418,15 @@ def main_menu() -> None:
             "MENU",
             [
                 row("1", "Launch ZzZ Code", note="desktop or CLI"),
-                row("2", "Settings", note="keeper \u00b7 guard \u00b7 proxy \u00b7 stealth"),
+                group("runtime"),
+                row("2", "Settings", note="keeper \u00b7 guard \u00b7 proxy"),
                 row("3", "Status", note="tunnel \u00b7 processes \u00b7 art"),
+                group("maintenance"),
                 row("4", "Repair patch", note="restage zzzcode.exe"),
                 row("5", "Doctor", note="diagnostics"),
                 row("6", "Restore vanilla", note="undo desktop edits"),
                 spacer(),
-                row("0", "Exit"),
+                row("0", "Exit", note="vendor install untouched"),
             ],
         )
         footer("0123456 c", "c repaints the page")
@@ -4383,7 +4435,7 @@ def main_menu() -> None:
             continue
         if choice in ("0", "q"):
             print()
-            print("   " + c_dim("closed · the vendor install is untouched"))
+            print(MARGIN + c_dim("closed · the vendor install is untouched"))
             print()
             return
         if choice == "1":
