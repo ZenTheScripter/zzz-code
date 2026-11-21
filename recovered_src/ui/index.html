@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ZzZ Code Control Center</title>
+<title>ZzZ Code</title>
 <style>
   :root {
     --bg: #0d1117;
@@ -103,7 +103,7 @@
     white-space: nowrap;
   }
 
-  .zenzenitozeno-badge {
+  .zzz-badge {
     font-size: 10px;
     font-weight: 600;
     padding: 2px 7px;
@@ -684,7 +684,7 @@
   <!-- Top Header -->
   <header class="topbar">
     <div class="brand"
-         data-tip-title="ZzZ Code Control Center"
+         data-tip-title="ZzZ Code"
          data-tip-body="Windows controller for Cloudflare WARP IPv6 identity rotation, Cloudflare edge pinning, and quota-wall auto-healing across OpenCode Desktop and OpenCode CLI.">
       <div class="logo-box">
         <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
@@ -694,8 +694,8 @@
       </div>
       <div>
         <div class="brand-title">
-          OPENCODE UNLIMITED
-          <span class="zenzenitozeno-badge">made by ZenZenitoZeno</span>
+          ZzZ CODE
+          <span class="zzz-badge">control center</span>
           <span class="tag ok" style="font-size:10px;font-weight:700;padding:2px 7px;margin-left:6px;">v3.0</span>
         </div>
         <div class="brand-sub">WARP IPv6 /64 Rotator &bull; Cloudflare Edge Pinner &bull; Windows Egress Lane</div>
@@ -1135,7 +1135,7 @@
       <span id="inspTitle" class="insp-title">Hover any control or metric</span>
       <span id="inspBody" class="insp-body">Move your cursor over any button, card, switch, or log tab to inspect how it works.</span>
     </div>
-    <div class="insp-credit">ZzZ Code Control Center</div>
+    <div class="insp-credit">ZzZ Code — see CREDITS.md for the upstream this stack was recovered from.</div>
   </footer>
 
   <!-- Floating Tooltip -->
@@ -1778,7 +1778,7 @@
   $("btnInstallRepair").onclick = () => runAction("btnInstallRepair", () => window.pywebview.api.install_or_repair(), "Repairing...");
   $("btnUninstall").onclick = () => {
     confirmDialog(
-      "Uninstall Opencode Unlimited?",
+      "Uninstall ZzZ Code?",
       "This removes background tasks, proxy overrides from service.json, shims, PATH entry, and %LOCALAPPDATA%\\opencode-unlimited. Your OpenCode projects, sessions, and Cloudflare WARP app remain untouched.",
       () => runAction("btnUninstall", () => window.pywebview.api.uninstall_all(), "Removing...")
     );
