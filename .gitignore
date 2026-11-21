@@ -1,0 +1,14 @@
+# build output
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.py[cod]
+
+# local state - never commit runtime markers or cached sheets
+.zzzcode/
+*.log
+
+# editor
+.vscode/
+.idea/

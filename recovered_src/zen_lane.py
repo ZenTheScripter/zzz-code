@@ -1,0 +1,212 @@
+"""Zen Lane for Windows: launches opencode through an ephemeral WARP IPv6-pinned proxy."""
+
+from __future__ import annotations
+
+import os
+import socket
+import subprocess
+import sys
+import time
+
+from ouc_common import (
+    LANE_DIR,
+    ensure_warp_mode,
+    ensure_warp_protocol,
+    find_opencode_cli,
+    find_opencode_desktop,
+    find_warp_cli,
+    get_warp_local_v6,
+    repair_warp_registration,
+    run_warp,
+    warp_allowed,
+    warp_registration_healthy,
+    warp_service_start,
+)
+from zen_proxy import start_proxy_server
+
+_NO_STANDALONE_CMDS = {
+    "service",
+    "upgrade",
+    "update",
+    "uninstall",
+    "debug",
+}
+_INFO_FLAGS = {"--help", "-h", "--version", "-v", "--completions"}
+
+
+def _needs_tunnel(args: list[str]) -> bool:
+    if any(a in _INFO_FLAGS or a.startswith("--completions=") for a in args):
+        return False
+    for a in args:
+        if not a.startswith("-"):
+            return a not in _NO_STANDALONE_CMDS
+    return True
+
+
+def _should_add_standalone(args: list[str]) -> bool:
+    if any(
+        a in ("--standalone", "--server") or a.startswith("--server=")
+        for a in args
+    ):
+        return False
+    return _needs_tunnel(args)
+
+
+def _ensure_warp_up() -> str | None:
+    """Bring the tunnel up for a launch and return the local WARP /64."""
+    if not warp_allowed():
+        return None  # cold start: the tunnel opens only inside a session
+
+    v6 = get_warp_local_v6()
+    if v6:
+        return v6
+
+    warp = find_warp_cli()
+    if not warp:
+        return None
+
+    # A cold machine has the WARP service on demand start, so a launch has to
+    # bring the service back up before warp-cli can dial the tunnel.
+    warp_service_start()
+    run_warp(["mode", "warp"], warp_bin=warp)
+    run_warp(["connect"], warp_bin=warp)
+    # A daemon that was just woken has to read its registration and pick an edge
+    # before the interface gets an address; 10 s is enough for a warm service and
+    # too tight for a cold one, and the connect itself is fire-and-forget, so it
+    # is re-sent once half way through instead of assuming it landed.
+    for attempt in range(20):
+        time.sleep(1.0)
+        v6 = get_warp_local_v6()
+        if v6:
+            return v6
+        if attempt == 5:
+            run_warp(["connect"], warp_bin=warp)
+    return None
+
+
+def _ensure_tunnel_up() -> bool:
+    """Ensure the selected upstream lane is reachable, repairing WARP once."""
+    mode = "warp"
+    scope = "tun" if sys.platform == "win32" else "isolated"
+    try:
+        from proxy_chain import get_egress_config
+
+        cfg = get_egress_config()
+        mode = cfg.get("mode", "warp")
+        scope = cfg.get("warp_scope", scope)
+    except Exception:
+        pass
+
+    if mode in ("tor", "custom"):
+        return True
+
+    if not warp_allowed():
+        return True  # cold start: never dial the tunnel outside a session
+
+    def _ready() -> bool:
+        if scope == "isolated":
+            try:
+                with socket.create_connection(("127.0.0.1", 40000), timeout=0.6):
+                    return True
+            except OSError:
+                pass
+        return bool(get_warp_local_v6())
+
+    if _ready():
+        return True
+
+    warp = find_warp_cli()
+    if not warp:
+        return True  # zen-proxy provides dual-stack fallback
+
+    is_strict = os.environ.get("OUC_STRICT_PROXY") == "1" or (
+        LANE_DIR / "strict_proxy.flag"
+    ).is_file()
+    if not is_strict:
+        return True  # zen-proxy keeps requests working via fallback
+
+    # Strict mode would return a 503 if the tunnel is down, so attempt the
+    # same non-destructive repair the keeper uses before giving up.
+    if not warp_registration_healthy(warp):
+        repair_warp_registration(warp, 2)
+    try:
+        ensure_warp_protocol("wireguard", warp_bin=warp)
+    except Exception:
+        pass
+    ensure_warp_mode(warp, scope)
+    run_warp(["connect"], warp_bin=warp)
+    for _ in range(10):
+        time.sleep(1.0)
+        if _ready():
+            return True
+    return False
+
+
+def main() -> int:
+    args = sys.argv[1:]
+
+    desktop_mode = False
+    if args and args[0] == "--ouc-desktop":
+        desktop_mode = True
+        args = args[1:]
+
+    if desktop_mode:
+        target = find_opencode_desktop()
+        if not target:
+            print("OpenCode.exe desktop app not found.", file=sys.stderr)
+            return 1
+    else:
+        target = find_opencode_cli()
+        if not target:
+            print(
+                "opencode CLI binary not found — set OUC_REAL_BIN or reinstall OpenCode.",
+                file=sys.stderr,
+            )
+            return 1
+
+    if not _needs_tunnel(args) and not desktop_mode:
+        cmd = [target, *args]
+        if target.lower().endswith((".cmd", ".bat")):
+            cmd = [os.environ.get("COMSPEC", "cmd.exe"), "/c", *cmd]
+        return subprocess.run(cmd).returncode
+
+    if not _ensure_tunnel_up():
+        print(
+            "[zen-lane] Network tunnel is not accessible (fail-closed strict mode is active).\n"
+            "Disable Strict Mode or run: opencode-unlimited-doctor",
+            file=sys.stderr,
+        )
+        return 1
+
+    srv, port, _edge = start_proxy_server(0)
+    proxy_url = f"http://127.0.0.1:{port}"
+    env = os.environ.copy()
+    env["HTTPS_PROXY"] = proxy_url
+    env["HTTP_PROXY"] = proxy_url
+    env["https_proxy"] = proxy_url
+    env["http_proxy"] = proxy_url
+    env["NO_PROXY"] = "127.0.0.1,localhost,::1"
+    env["no_proxy"] = "127.0.0.1,localhost,::1"
+
+    launch_args = list(args)
+    if desktop_mode:
+        launch_args = [f"--proxy-server={proxy_url}", *launch_args]
+    elif _should_add_standalone(launch_args):
+        launch_args = ["--standalone", *launch_args]
+
+    cmd = [target, *launch_args]
+    if target.lower().endswith((".cmd", ".bat")):
+        cmd = [os.environ.get("COMSPEC", "cmd.exe"), "/c", *cmd]
+
+    try:
+        proc = subprocess.run(cmd, env=env)
+        return proc.returncode
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
