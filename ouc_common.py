@@ -906,8 +906,13 @@ def append_log(path: Path, message: str, max_bytes: int = 1_048_576) -> None:
         pass
 
 
-def fetch_opencode_aaaa_pool() -> list[str]:
-    """Gather live IPv6 addresses for opencode.ai via DoH, system DNS, and fallback."""
+def fetch_opencode_aaaa_pool(timeout: float = 3.5) -> list[str]:
+    """Gather live IPv6 addresses for opencode.ai via DoH, system DNS, and fallback.
+
+    Three DoH round trips plus two resolver calls: behind a cold tunnel that can
+    run past ten seconds, so callers that paint a page pass a short `timeout` and
+    keep the last known pool instead of stalling the UI.
+    """
     pool: set[str] = set()
 
     for doh_url in (
@@ -917,7 +922,7 @@ def fetch_opencode_aaaa_pool() -> list[str]:
     ):
         try:
             req = urllib.request.Request(doh_url, headers={"Accept": "application/dns-json"})
-            with urllib.request.urlopen(req, timeout=3.5) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
             for ans in data.get("Answer", []):
                 if ans.get("type") == 28:

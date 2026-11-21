@@ -68,7 +68,7 @@ def main() -> int:
 
     print("")
     print("  =============================")
-    print("  Opencode Unlimited — doctor")
+    print("  ZzZ Code — doctor")
     print("  =============================")
     print("")
 

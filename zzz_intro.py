@@ -654,13 +654,22 @@ def reveal(line: str, delay: float = 0.018) -> None:
     else:
         print(line)
 
-def decode_lines(lines: list[str], delay: float = 0.016, passes: int = 5) -> None:
-    """Paint lines as scrambling glyphs that resolve into the real text.
+BOX_CHARS = " \u2500\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u25b8\u00b7"
 
-    Used for the first menu page: every row starts as noise, then locks in from
-    the left one column at a time while the unlocked tail keeps mutating. Box
-    drawing characters are exempt - a frame border that flickers is unreadable,
-    so borders paint immediately and only the content resolves.
+
+def decode_block(
+    lines: list[str],
+    delay: float = 0.014,
+    passes: int = 4,
+    final: list[str] | None = None,
+) -> None:
+    """Resolve `lines` in place, at the cursor, without touching the page above.
+
+    Rows start as noise and lock in from the left one column at a time; the
+    unlocked tail keeps mutating. Box drawing and spaces are exempt so the frame
+    stays readable while the text inside it resolves. Each frame is rewritten
+    over the previous one by moving up `len(lines) - 1` rows, so the wordmark and
+    the banner printed earlier keep their place.
     """
     if not enabled() or not lines:
         for line in lines:
@@ -668,28 +677,38 @@ def decode_lines(lines: list[str], delay: float = 0.016, passes: int = 5) -> Non
         return
 
     out = sys.stdout
-    plain = [line for line in lines]
-    width = max((len(line) for line in plain), default=1)
-    rng = random.Random()
+    width = max((len(line) for line in lines), default=1)
     frames = max(1, min(passes, 8))
+    rng = random.Random()
     glyphs = "01<>[]{}/\\|=+-*#$%&;:!?"
+    total = len(lines)
     out.write("\x1b[?25l")
     try:
         for frame in range(frames):
-            locked = 0 if frame == 0 else (width * frame // frames)
-            rows = []
-            for line in plain:
+            locked = width * frame // frames
+            for i, line in enumerate(lines):
                 buf = []
                 for x, ch in enumerate(line):
-                    if ch in " \u2500\u2502\u250c\u2510\u2514\u2518\u25b8\u00b7" or x < locked:
+                    if ch in BOX_CHARS or x < locked:
                         buf.append(ch)
                     else:
                         buf.append(rng.choice(glyphs))
-                rows.append("   " + "".join(buf))
-            out.write("\x1b[H" + "\n".join(rows) + "\x1b[0m")
+                out.write("\r" + "".join(buf) + ("\n" if i < total - 1 else ""))
+            out.write("\x1b[0m")
             out.flush()
             time.sleep(delay)
-        out.write("\x1b[H" + "\n".join("   " + line for line in plain) + "\x1b[0m\n")
+            if frame < frames - 1:
+                out.write("\x1b[%dA" % max(0, total - 1))
+        # Park the cursor back on the block's first row: the last scrambled row
+        # ends without a newline, so without this the settled frame lands under
+        # the noise instead of over it.
+        out.write("\x1b[%dA" % max(0, total - 1))
+        # The caller passes the coloured rows so the settled frame is the real
+        # UI and not the plain text the scramble was built from.
+        settled = final if final and len(final) == total else lines
+        for i, line in enumerate(settled):
+            out.write("\r" + line + ("\n" if i < total - 1 else ""))
+        out.write("\x1b[0m\n")
         out.flush()
     finally:
         out.write("\x1b[?25h")

@@ -549,10 +549,7 @@ def panel(title: str, rows: list[tuple[str, str, str, str]]) -> None:
 
             if zzz_intro.enabled():
                 plain = [_ANSI.sub("", line) for line in lines]
-                zzz_intro.decode_lines(plain, delay=0.014, passes=4)
-                print("\x1b[%dA" % max(0, len(plain) - 1), end="")
-                for line in lines:
-                    print(line)
+                zzz_intro.decode_block(plain, delay=0.014, passes=4, final=lines)
                 return
         except Exception:
             pass
@@ -563,14 +560,42 @@ def panel(title: str, rows: list[tuple[str, str, str, str]]) -> None:
 _ANSI = re.compile("\\x1b\\[[0-9;]*m")
 
 
+def _fit_note(left_plain: str, note: str) -> str:
+    """Clamp the right column so the panel keeps one column of breathing room.
+
+    A note longer than the gap used to push the right border out by however many
+    characters it ran over; paths and proxy details are the usual offenders.
+    """
+    room = max(4, PANEL_INNER - len(left_plain) - 1)
+    if len(note) <= room:
+        return note
+    return note[: room - 2] + ".."
+
+
 def row(num: str, label: str, on: bool | None = None, note: str = "") -> tuple[str, str, str, str]:
-    """A menu row: key, label, optional ON/off chip or a dim note."""
+    """A menu row: key, label, then a state chip, a dim note, or both.
+
+    When a row carries both state and detail the note wins the column and the
+    chip becomes its leading mark, so `warp-cli` can read `off  not installed`
+    instead of losing the reason it is off.
+    """
     left_plain = "[%s] %s" % (num, label)
     left_color = c_cyan("[%s]" % num) + " " + c_white(label)
+    if on is not None and note:
+        text = _fit_note(left_plain, ("\u25cf " if on else "\u25cb ") + note)
+        head, body = text[:2], text[2:]
+        return (
+            left_plain,
+            left_color,
+            text,
+            (c_green(head) if on else c_faint(head)) + c_dim(body),
+        )
     if on is not None:
-        return left_plain, left_color, ("ON" if on else "off"), (c_green("\u25cf ON") if on else c_faint("\u25cb off"))
+        chip = "\u25cf ON" if on else "\u25cb off"
+        return left_plain, left_color, chip, (c_green(chip) if on else c_faint(chip))
     if note:
-        return left_plain, left_color, note, c_dim(note)
+        text = _fit_note(left_plain, note)
+        return left_plain, left_color, text, c_dim(text)
     return left_plain, left_color, "", ""
 
 
@@ -950,11 +975,40 @@ def reroll_edge() -> tuple[bool, str]:
     return True, "edge re-rolled: %s" % (edge or "applies on next request")
 
 
-def edge_rows() -> int:
+_EDGE_ROWS: dict[str, object] = {"n": 0, "at": 0.0, "busy": False}
+
+
+def _edge_refresh() -> None:
+    """One bounded pool lookup, off the paint path."""
     try:
-        return len(fetch_opencode_aaaa_pool())
+        _EDGE_ROWS["n"] = len(fetch_opencode_aaaa_pool(timeout=1.6))
     except Exception:
-        return 0
+        pass
+    finally:
+        _EDGE_ROWS["at"] = time.time()
+        _EDGE_ROWS["busy"] = False
+
+
+def edge_rows() -> int:
+    """Live AAAA count for the edge re-roll row, cached for five minutes.
+
+    The lookup is three DoH round trips plus a resolver call: behind a cold
+    tunnel that runs past ten seconds, and the settings page used to sit blank
+    for that whole time because it was built inline. The page now paints the last
+    known count and a daemon thread refreshes it behind the paint.
+    """
+    if not _EDGE_ROWS["busy"] and time.time() - float(_EDGE_ROWS["at"]) > 300:
+        _EDGE_ROWS["busy"] = True
+        threading.Thread(target=_edge_refresh, daemon=True).start()
+    return int(_EDGE_ROWS["n"] or 0)
+
+
+def edge_rows_label() -> str:
+    """'12 AAAA' once known, 'probing' while the first lookup is in flight."""
+    count = edge_rows()
+    if count:
+        return "%d AAAA" % count
+    return "probing" if _EDGE_ROWS["busy"] else "no AAAA"
 
 
 # --------------------------------------------------- stealth AGENTS.md feed
@@ -3459,6 +3513,38 @@ def _prompt(keys: str = "0123456789") -> str:
             return raw
 
 
+def _hold(hint: str = "enter returns to the menu") -> None:
+    """Keep an action log on screen until the reader dismisses it.
+
+    repair_patch, doctor and vanilla_restore print their findings and the menu
+    loop repaints over them a few milliseconds later, so the output could not be
+    read. This blocks on one key first.
+    """
+    print()
+    label = "  " + c_faint(hint + " ")
+    if _msvcrt is not None:
+        try:
+            if sys.stdin.isatty():
+                sys.stdout.write(label)
+                sys.stdout.flush()
+                while True:
+                    ch = _msvcrt.getwch()
+                    if ch in ("\x00", "\xe0"):
+                        _msvcrt.getwch()
+                        continue
+                    if ch in ("\r", "\n", " "):
+                        break
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                return
+        except Exception:
+            pass
+    try:
+        input(label)
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
 def egress_menu() -> None:
     while True:
         cfg = egress_config()
@@ -3523,7 +3609,7 @@ def settings_menu() -> None:
         ups = update_status()
         route = str(egress_config().get("mode") or "warp")
 
-        heading("Settings", "opencode-unlimited stack")
+        heading("Settings", "warp lane stack")
 
         rows = [
             row("1", "WARP Keeper", on=keeper),
@@ -3539,7 +3625,7 @@ def settings_menu() -> None:
             row("u", "Updates", on=ups["enabled"], note=ups["status"]),
             spacer(),
             row("8", "Rotate /64 now", note="manual hop"),
-            row("9", "Re-roll Cloudflare edge", note="%d AAAA" % edge_rows()),
+            row("9", "Re-roll Cloudflare edge", note=edge_rows_label()),
             row("v", "Verify stack", note="probe + auto-repair"),
             row("0", "Back"),
         ]
@@ -3619,43 +3705,104 @@ def launch_menu() -> None:
             return
 
 
-def status_page() -> None:
-    while True:
-        heading("Status", "live probe")
+_STATUS: dict[str, object] = {"data": None, "at": 0.0, "busy": False}
+
+
+def _status_refresh() -> None:
+    """One full status pass, off the paint path.
+
+    warp-cli, the resolver, asar_state and the proxy probe together run past ten
+    seconds on a cold tunnel, and the page used to build all of it inline so the
+    console sat empty after the wordmark. Nothing here touches stdout.
+    """
+    data: dict[str, object] = {"art": {"available": False, "patched": False, "pending": 0, "error": ""}}
+    try:
         warp = find_warp_cli()
-        connected, mode, raw = warp_status(warp) if warp else (False, "", "warp-cli missing")
-        v6 = get_warp_local_v6() or ""
+        data["warp"] = warp
+        if warp:
+            connected, mode, raw = warp_status(warp)
+        else:
+            connected, mode, raw = False, "", "warp-cli missing"
+        data["connected"] = connected
+        data["mode"] = mode
+        data["raw"] = raw
+        data["v6"] = get_warp_local_v6() or ""
         try:
             from patch_desktop import asar_state
 
-            art = asar_state()
+            data["art"] = asar_state()
         except Exception:
-            art = {"available": False, "patched": False, "pending": 0, "error": "module missing"}
+            data["art"] = {"available": False, "patched": False, "pending": 0, "error": "module missing"}
+        data["pids"] = desktop_pids()
+        if port_open(keeper_port()):
+            data["probe"] = probe_proxy(keeper_port(), timeout=4.0)
+        else:
+            data["probe"] = (False, "")
+    except Exception as exc:
+        data["error"] = str(exc)[:60]
+    _STATUS["data"] = data
+    _STATUS["at"] = time.time()
+    _STATUS["busy"] = False
+
+
+def status_snapshot(ttl: float = 8.0) -> dict[str, object]:
+    """Cached status pass; the refresh runs behind the paint.
+
+    Returns whatever was sampled last, so a page always paints instantly. The
+    first visit shows `probing` on the measured rows and the next visit shows the
+    real values. `c` forces a repaint without invalidating the cache.
+    """
+    stale = time.time() - float(_STATUS["at"]) > ttl
+    if stale and not _STATUS["busy"]:
+        _STATUS["busy"] = True
+        threading.Thread(target=_status_refresh, daemon=True).start()
+    return _STATUS["data"] or {}  # type: ignore[return-value]
+
+
+def status_page() -> None:
+    while True:
+        heading("Status", "live probe")
+        snap = status_snapshot()
+        pending = not snap
+        warp = snap.get("warp") or ""
+        connected = bool(snap.get("connected"))
+        mode = str(snap.get("mode") or "")
+        raw = str(snap.get("raw") or "")
+        v6 = str(snap.get("v6") or "")
+        if pending:
+            tunnel_note = "probing"
+        elif not warp:
+            tunnel_note = "no warp-cli"
+        else:
+            tunnel_note = ("%s %s" % (mode or "?", raw[:32])).strip()
+        art = snap.get("art") or {"available": False, "patched": False, "pending": 0}
+        probe_ok, probe_detail = snap.get("probe") or (False, "")
+        pids = list(snap.get("pids") or [])
+        online = port_open(keeper_port())
+        keeper_on = worker_running("keeper")
+        guard_on = worker_running("guard")
 
         panel(
             "TUNNEL",
             [
-                row("w", "warp-cli", on=bool(warp), note=warp or "not installed"),
-                row("t", "tunnel", on=connected, note="%s %s" % (mode or "?", raw[:32])),
-                row("6", "/64 prefix", on=bool(v6), note=normalize_v6_64(v6) or v6 or "none"),
+                row("w", "warp-cli", on=bool(warp), note=str(warp or ("probing" if pending else "not installed"))),
+                row("t", "tunnel", on=connected, note=tunnel_note),
+                row("6", "/64 prefix", on=bool(v6), note=normalize_v6_64(v6) or v6 or ("probing" if pending else "none")),
                 row("r", "rotating", on=not is_keeper_paused(), note="paused" if is_keeper_paused() else "idle"),
             ],
         )
-        probe_ok, probe_detail = (False, "")
-        if port_open(keeper_port()):
-            probe_ok, probe_detail = probe_proxy(keeper_port(), timeout=10.0)
         print()
         panel(
             "PROCESSES",
             [
-                row("k", "keeper", on=worker_running("keeper")),
-                row("g", "guard", on=worker_running("guard")),
-                row("z", "zen proxy", on=port_open(keeper_port()),
+                row("k", "keeper", on=keeper_on),
+                row("g", "guard", on=guard_on),
+                row("z", "zen proxy", on=online,
                     note="127.0.0.1:%d" % keeper_port()),
                 row("t", "proxy e2e", on=probe_ok,
-                    note=probe_detail[:44] or "not listening"),
-                row("d", "desktop app", on=bool(desktop_pids()),
-                    note="%d process(es)" % len(desktop_pids())),
+                    note=(probe_detail[:44] or "not listening") if snap else "probing"),
+                row("d", "desktop app", on=bool(pids),
+                    note="%d process(es)" % len(pids) if snap else "probing"),
             ],
         )
         print()
@@ -3665,8 +3812,8 @@ def status_page() -> None:
                 row("c", "cli wordmark", on=PATCHED.is_file(),
                     note=str(PATCHED) if PATCHED.is_file() else "missing"),
                 row("p", "desktop wordmark",
-                    on=art["patched"],
-                    note="%d block(s) pending" % art["pending"] if art["available"] and art["pending"] else ""),
+                    on=bool(art.get("patched")),
+                    note="%d block(s) pending" % art.get("pending", 0) if art.get("available") and art.get("pending") else ""),
                 row("s", "abliterated feed", on=inject_enabled()),
                 row("f", "kill-switch", on=is_killswitch_installed()),
                 row("x", "strict mode", on=strict_mode()),
@@ -4044,10 +4191,13 @@ def main_menu() -> None:
             status_page()
         elif choice == "4":
             repair_patch()
+            _hold()
         elif choice == "5":
             doctor()
+            _hold()
         elif choice == "6":
             vanilla_restore()
+            _hold()
 
 
 # -------------------------------------------------------------- dispatch
