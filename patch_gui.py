@@ -1530,7 +1530,7 @@ def build_share_png(width: int = 1200, height: int = 630) -> bytes:
 def build_icon_png(size: int = 96) -> bytes:
     scale = 14
     pad = (size - 4 * scale) // 2
-    word = "ZZZ CODE"
+    word = "ZZZCODE"
     _, span = _stamp(word, scale, 1, 0, 0)
     cells, _ = _stamp(word, scale, 1, (size - span) // 2, pad)
 
