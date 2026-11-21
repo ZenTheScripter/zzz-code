@@ -4179,8 +4179,8 @@ def install_launchers() -> tuple[bool, str]:
         if _shortcut(link, target, args, workdir, icon):
             changed = True
 
-    where = ";".join(str(link) for link in places)
-    return changed, "zzzcode on PATH, icons at %s" % where
+    where = "desktop + start menu"
+    return changed, "zzzcode on PATH \u00b7 icons on %s" % where
 
 
 def _crash_report(exc: BaseException) -> int:
