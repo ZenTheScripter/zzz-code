@@ -968,9 +968,13 @@ GUI_JS = r"""(function () {
   }
 
   function clearSelection(host) {
-    var wraps = host.groups.querySelectorAll("[data-slot=tabs-v2-trigger-wrapper] [data-selected]");
+    var wraps = host.groups.querySelectorAll("[data-slot=tabs-v2-trigger-wrapper]");
     for (var i = 0; i < wraps.length; i += 1) {
-      if (!wraps[i].closest("[data-zzz-tab]")) wraps[i].removeAttribute("data-selected");
+      var trigger = wraps[i].querySelector('[data-slot="tabs-v2-trigger"]');
+      if (!trigger) continue;
+      trigger.removeAttribute("data-selected");
+      trigger.setAttribute("aria-selected", "false");
+      trigger.setAttribute("tabindex", "-1");
     }
   }
 
@@ -1351,7 +1355,7 @@ COPY_PAIRS = (
     ),
     (
         b"`OpenCode is a registered trademark of Anomaly Innovations, Inc.`",
-        b"`ZzZ Code is a modified build of OpenCode. Research use only.`",
+        b"`ZenZenitoZeno - research use only.`",
     ),
     (
         b"`OpenCode includes the following open source software.`",
@@ -1526,7 +1530,9 @@ def build_share_png(width: int = 1200, height: int = 630) -> bytes:
 def build_icon_png(size: int = 96) -> bytes:
     scale = 14
     pad = (size - 4 * scale) // 2
-    cells, _ = _stamp("Z", scale, 1, pad, (size - 5 * scale) // 2)
+    word = "ZZZ CODE"
+    _, span = _stamp(word, scale, 1, 0, 0)
+    cells, _ = _stamp(word, scale, 1, (size - span) // 2, pad)
 
     def shade(x, y):
         if (x, y) in cells:
@@ -1540,7 +1546,7 @@ def build_icon_png(size: int = 96) -> bytes:
 ICON_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">'
     '<rect width="32" height="32" rx="7" fill="#0b0b0f"/>'
-    '<path d="M8 8h16l-11 10h11l-16 8 8-10H8z" fill="#35e0b0"/>'
+    '<text x="6" y="23" fill="#35e0b0" font-size="26" font-family="sans-serif">zzz code</text>'
     "</svg>\n"
 ).encode("utf-8")
 
