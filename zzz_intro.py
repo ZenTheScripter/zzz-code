@@ -331,7 +331,6 @@ def rain_reveal(
     cols = max(24, min(w - 1, 150))
     rows = max(12, h - 2)
     count = len(art_rows)
-    width = max((len(r) for r in art_rows), default=1)
     left, top = _place(art_rows, cols, rows)
 
     frames = max(1, min(int(duration * fps), 200))
@@ -493,11 +492,95 @@ def word_glow(
         out.flush()
 
 
+def shell_reveal(
+    word: str = "MADE BY ZZZ",
+    left: int = 0,
+    top: int = 0,
+    height: int = 4,
+    delay: float = 0.05,
+    beat: float = 0.85,
+) -> None:
+    """The word as a shell transcript, typed under the art the rain left.
+
+    Three lines, absolute addressed so the rain art above is never scrolled:
+
+        $ echo "MADE BY ZZZ"        typed character by character, cursor trailing
+        MADE BY ZZZ                 lands in the word ramp, left to right
+        $                           blinking prompt, holds for `beat` seconds
+
+    Every coordinate is clamped to the terminal, so a short window renders
+    nothing instead of wrapping the art off screen.
+    """
+    if not enabled():
+        return
+    cols, rows = size()
+    command = 'echo "%s"' % word
+    row_cmd = top + max(1, height) + 1
+    row_out = row_cmd + 1
+    row_end = row_out + 1
+    if row_end >= rows or cols < 30:
+        return
+    indent = max(0, min(left, cols - 4))
+    budget = max(1, cols - indent - 2)
+    command = command[: max(0, budget)]
+    blank = " " * (len(command) + 1)
+
+    out = sys.stdout
+    out.write("\x1b[?25l")
+    try:
+        for step in range(len(command) + 1):
+            typed = command[:step]
+            pad = blank[len(typed):]
+            out.write(
+                "\x1b[%d;%dH%s%s%s%s"
+                % (
+                    row_cmd + 1,
+                    indent + 1,
+                    _c("46", "$") + " ",
+                    _c("255", typed),
+                    _c("238", "\u2588"),
+                    pad,
+                )
+            )
+            out.write("\x1b[0m")
+            out.flush()
+            time.sleep(delay)
+
+        out.write("\x1b[%d;%dH\n" % (row_cmd + 1, indent + 1))
+        out.write("\x1b[%d;%dH" % (row_out + 1, indent + 1))
+        for x, ch in enumerate(word[:budget]):
+            color = WORD_RAMP[min(len(WORD_RAMP) - 1, x * len(WORD_RAMP) // max(1, len(word)))]
+            out.write(_c(color, ch) if ch != " " else " ")
+            out.flush()
+            time.sleep(max(0.012, delay * 0.6))
+        out.write("\x1b[0m")
+
+        blink = 0.28
+        on = True
+        held = 0.0
+        while held < beat:
+            out.write(
+                "\x1b[%d;%dH%s"
+                % (row_end + 1, indent + 1, _c("46", "$") + " " + (_c("238", "\u2588") if on else " "))
+            )
+            out.write("\x1b[0m")
+            out.flush()
+            time.sleep(blink)
+            held += blink
+            on = not on
+    finally:
+        out.write("\x1b[0m\x1b[?25h")
+        out.flush()
+
+
 def intro_sequence(word: str = "MADE BY ZZZ", duration: float = 3.6, fps: int = 24) -> None:
-    """Rain reveal, then the light crossing the art it left behind."""
+    """Rain reveal, the light crossing the art, then the shell transcript."""
     geometry = rain_reveal(word, duration=duration, fps=fps)
-    if geometry:
-        word_glow(*geometry)
+    if not geometry:
+        return
+    art_rows, left, top = geometry
+    word_glow(art_rows, left, top)
+    shell_reveal(word, left, top, len(art_rows))
 
 
 # ------------------------------------------------------------- menu banner

@@ -56,6 +56,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import urllib.parse
 import urllib.request
 import winreg
@@ -3147,8 +3148,10 @@ def launch_desktop() -> None:
         step("OpenCode Desktop is already running", ok=False,
              detail="%d process(es) - the bundle is rewritten at launch" % len(pids))
         print("  " + c_dim("the patch cannot land on a bundle that is in use"))
+        print("  " + c_dim("k closes it and relaunches with the patch"))
+        print("  " + c_dim("any other key goes back to the menu"))
         print()
-        if _prompt("kb") != "k":
+        if _prompt("k") != "k":
             return
         working("Closing OpenCode Desktop", 0.6)
         for pid in pids:
@@ -3484,7 +3487,7 @@ def _prompt(keys: str = "0123456789") -> str:
     label = "  " + c_magenta("zzz\u25b8 ") + c_faint("[%s] " % shown)
     if _msvcrt is not None:
         try:
-            if sys.stdin.isatty():
+            if _console_input():
                 sys.stdout.write(label)
                 sys.stdout.flush()
                 while True:
@@ -3513,6 +3516,23 @@ def _prompt(keys: str = "0123456789") -> str:
             return raw
 
 
+def _console_input() -> bool:
+    """True only when stdin is a real console handle.
+
+    `sys.stdin.isatty()` also says yes for NUL and for a detached stdin, where
+    `getwch()` never returns a key and the prompt hangs forever. GetConsoleMode
+    fails on every non-console handle, which is the check that actually holds.
+    """
+    if _msvcrt is None:
+        return False
+    try:
+        handle = ctypes.windll.kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        mode = ctypes.c_uint32()
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except Exception:
+        return False
+
+
 def _hold(hint: str = "enter returns to the menu") -> None:
     """Keep an action log on screen until the reader dismisses it.
 
@@ -3522,14 +3542,18 @@ def _hold(hint: str = "enter returns to the menu") -> None:
     """
     print()
     label = "  " + c_faint(hint + " ")
-    if _msvcrt is not None:
+    if _msvcrt is not None and _console_input():
         try:
             if sys.stdin.isatty():
                 sys.stdout.write(label)
                 sys.stdout.flush()
                 while True:
                     ch = _msvcrt.getwch()
-                    if ch in ("\x00", "\xe0"):
+                    if not ch or ch in ("\x00", "\x1a", "\x03"):
+                        # NUL stdin and Ctrl-C both read as a key; leaving the
+                        # loop is better than spinning on a dead handle.
+                        break
+                    if ch == "\xe0":
                         _msvcrt.getwch()
                         continue
                     if ch in ("\r", "\n", " "):
@@ -4017,6 +4041,177 @@ def ensure_prerequisites(force: bool = False) -> None:
     )
 
 
+# --------------------------------------------------------------- launchers
+#
+# Two things have to exist before "just run it" is true on a fresh machine: a
+# name on PATH so a terminal can open the menu, and an icon on the desktop so
+# there is something to click. Both are written here on every boot, idempotently
+# - a moved exe or a deleted shortcut heals on the next start.
+
+SHIM_DIR = LOCAL_ROOT / "cli"
+SHORT_NAME = "ZzZ Code"
+
+
+def _launcher_parts() -> tuple[str, str, str]:
+    """Target exe, its arguments, and the working directory for a shortcut."""
+    exe = Path(sys.executable).resolve()
+    if FROZEN:
+        return str(exe), "", str(exe.parent)
+    return str(exe), '"%s"' % Path(__file__).resolve(), str(Path(__file__).resolve().parent)
+
+
+def _write_if_changed(path: Path, text: str) -> bool:
+    body = text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
+    try:
+        if path.is_file() and path.read_bytes() == body:
+            return False
+    except OSError:
+        pass
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        return True
+    except OSError:
+        return False
+
+
+def _shim_text(target: str, args: str = "") -> str:
+    exe = target if target.startswith('"') else '"%s"' % target
+    line = exe + ((" " + args) if args else "") + " %*"
+    return "@echo off\nrem ZzZ Code - rewritten on every boot, edit the app instead.\n%s\n" % line
+
+
+def _path_ensure(folder: Path) -> bool:
+    """Add `folder` to the user PATH once. Returns True when it was added."""
+    try:
+        import winreg
+    except Exception:
+        return False
+    entry = str(folder)
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ) as key:
+            try:
+                current, kind = winreg.QueryValueEx(key, "Path")
+            except FileNotFoundError:
+                current, kind = "", winreg.REG_EXPAND_SZ
+    except OSError:
+        return False
+    parts = [p for p in str(current).split(";") if p.strip()]
+    if any(p.strip().lower().rstrip("\\") == entry.lower().rstrip("\\") for p in parts):
+        return False
+    # Front of the user PATH: the shims must win over any stale zzzcode.exe
+    # an older install dropped in a bin folder.
+    parts.insert(0, entry)
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_WRITE) as key:
+            winreg.SetValueEx(key, "Path", 0, kind or winreg.REG_EXPAND_SZ, ";".join(parts))
+    except OSError:
+        return False
+    try:
+        ctypes.windll.user32.SendMessageTimeoutW(
+            0xFFFF, 0x001A, 0, ctypes.c_wchar_p("Environment"), 0x0002, 3000, None
+        )
+    except Exception:
+        pass
+    return True
+
+
+def _shortcut(link: Path, target: str, args: str, workdir: str, icon: str) -> bool:
+    """Write a .lnk through WScript.Shell; silent failure, no console flash."""
+    script = (
+        "$w = New-Object -ComObject WScript.Shell; "
+        "$s = $w.CreateShortcut('%s'); "
+        "$s.TargetPath = '%s'; $s.Arguments = '%s'; $s.WorkingDirectory = '%s'; "
+        "$s.IconLocation = '%s,0'; $s.Description = '%s'; $s.Save()"
+        % (link, target, args, workdir, icon, SHORT_NAME)
+    )
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-Command", script],
+            capture_output=True, timeout=60, creationflags=CREATE_NO_WINDOW,
+        )
+        return proc.returncode == 0 and link.is_file()
+    except Exception:
+        return False
+
+
+def install_launchers() -> tuple[bool, str]:
+    """CLI shim + PATH entry + desktop and Start Menu icons.
+
+    Returns (changed, detail). Nothing here may abort a boot: a locked registry
+    or a policy that blocks shortcut creation leaves the menu working without
+    them, so every step is a best-effort write.
+    """
+    target, args, workdir = _launcher_parts()
+    changed = False
+
+    for name in ("zzzcode.cmd", "zzz.cmd", "zzz-code.cmd"):
+        changed |= _write_if_changed(SHIM_DIR / name, _shim_text(target, args))
+    if PATCHED.is_file():
+        changed |= _write_if_changed(
+            SHIM_DIR / "zzzcode-cli.cmd", _shim_text('"%s"' % PATCHED)
+        )
+    changed |= _path_ensure(SHIM_DIR)
+
+    icon = str(APP_ROOT / "assets" / "zzz.ico")
+    if not Path(icon).is_file():
+        icon = target
+    places = []
+    try:
+        desktop = Path(
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "[Environment]::GetFolderPath('Desktop')"],
+                capture_output=True, text=True, timeout=30,
+                creationflags=CREATE_NO_WINDOW,
+            ).stdout.strip()
+            or (Path.home() / "Desktop")
+        )
+        places.append(desktop / (SHORT_NAME + ".lnk"))
+    except Exception:
+        pass
+    places.append(
+        Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+        / "Microsoft" / "Windows" / "Start Menu" / "Programs" / (SHORT_NAME + ".lnk")
+    )
+    for link in places:
+        if _shortcut(link, target, args, workdir, icon):
+            changed = True
+
+    where = ";".join(str(link) for link in places)
+    return changed, "zzzcode on PATH, icons at %s" % where
+
+
+def _crash_report(exc: BaseException) -> int:
+    """Log a fatal error, show it, and keep the window open.
+
+    A double-clicked launcher that raises used to print nothing and close, which
+    reads as "it does not start". The traceback now lands on screen and in
+    ~/.zzzcode/crash.log before anything exits.
+    """
+    text = traceback.format_exc()
+    try:
+        ensure_dirs()
+        log = STATE_DIR / "crash.log"
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write("\n%s  %s\n%s" % (time.strftime("%Y-%m-%d %H:%M:%S"), exc, text))
+    except Exception:
+        log = None
+    print()
+    print("   " + c_red("launcher stopped on an internal error"))
+    print()
+    for line in text.rstrip().splitlines()[-12:]:
+        print("   " + line)
+    print()
+    if log is not None:
+        print("   " + c_dim("full trace in %s" % log))
+    print()
+    if _console_input():
+        _hold("enter closes this window")
+    return 1
+
+
 # ------------------------------------------------------------------- boot
 
 # --------------------------------------------------------------- intro stage
@@ -4150,6 +4345,14 @@ def boot() -> None:
     if _agents_state().get("active") or CONFIG_BACKUP.is_file():
         ok, msg = inject_revert()
         step("Stealth feed left over", ok=ok, detail=msg)
+
+    # A name on PATH and an icon on the desktop, rewritten every boot so a moved
+    # exe or a deleted shortcut heals without a manual step.
+    try:
+        _launch_changed, launch_detail = install_launchers()
+        step("Launchers", detail=launch_detail)
+    except Exception:
+        pass
 
     print()
     print("   " + c_bold(c_green("ZzZ Code successfully loaded ! Enjoy !")))
@@ -4308,6 +4511,18 @@ def _self_dispatch(argv: list[str]) -> int | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        print()
+        return 0
+    except SystemExit:
+        raise
+    except BaseException as exc:  # noqa: BLE001 - a launcher must never vanish
+        return _crash_report(exc)
+
+
+def _main(argv: list[str] | None = None) -> int:
     global VT
     argv = list(sys.argv[1:] if argv is None else argv)
 
