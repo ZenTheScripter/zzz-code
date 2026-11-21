@@ -4203,6 +4203,38 @@ def main_menu() -> None:
 # -------------------------------------------------------------- dispatch
 
 def _self_dispatch(argv: list[str]) -> int | None:
+    if "--version" in argv or "-V" in argv:
+        print(APP_VERSION)
+        return 0
+
+    if "--help" in argv or "-h" in argv or "--?" in argv:
+        print("ZzZ Code %s" % APP_VERSION)
+        print()
+        for flag, about in (
+            ("(no flag)", "boot the intro and the menu"),
+            ("--no-menu", "boot and stage the runtime without the menu"),
+            ("--version, -V", "print the launcher version"),
+            ("--help, -h", "this list"),
+            ("--doctor", "run the diagnostics and exit"),
+            ("--worker keeper|guard", "run a worker in the foreground"),
+            ("--firewall install|remove", "add or drop the kill-switch rule"),
+            ("--warp-start", "elevate, grant, start the tunnel"),
+            ("--warp-cold apply|auto", "park the service until something needs it"),
+            ("--desktop-restore <pid>", "restore the desktop bundle after the app exits"),
+        ):
+            print("  %-26s %s" % (flag, about))
+        print()
+        print("state: %s" % STATE_DIR)
+        return 0
+
+    if "--doctor" in argv:
+        try:
+            from doctor import main as doctor_main
+        except Exception as exc:
+            print("doctor module unavailable: %s" % exc, file=sys.stderr)
+            return 1
+        return int(doctor_main() or 0)
+
     if "--worker" in argv:
         name = argv[argv.index("--worker") + 1]
         if name == "keeper":
