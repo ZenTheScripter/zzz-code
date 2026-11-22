@@ -2989,14 +2989,14 @@ def diagnostics() -> dict:
     # forward, which surfaces to the user as a bare "Unexpected error". Report
     # both stores so that mismatch is visible instead of silent.
     try:
-        store_desktop = str(DATA_DIR_DESKTOP)
-        store_cli = str(CLI_DATA_DIR)
-        if STORE_DESKTOP_DB.is_file() and CLI_DATA_DIR.is_dir():
-            store = "split - CLI keeps %s" % store_cli
+        if _runtime_major() >= 2:
+            store = "shared - %s" % DATA_DIR_DESKTOP
+        elif CLI_DATA_DIR.is_dir():
+            store = "split - CLI keeps %s" % CLI_DATA_DIR
         elif STORE_DESKTOP_DB.is_file():
-            store = "shared - %s" % store_desktop
+            store = "would collide - %s" % DATA_DIR_DESKTOP
         else:
-            store = "fresh - %s" % store_cli
+            store = "fresh - %s" % CLI_DATA_DIR
     except Exception:
         store = "unknown"
 
@@ -3780,8 +3780,14 @@ def launch_cli() -> None:
         srv.shutdown()
         srv.server_close()
         return
-    env["XDG_DATA_HOME"] = str(CLI_DATA_DIR)
-    step("session store", detail=str(CLI_DATA_DIR))
+    # A 2.x runtime migrates the desktop's database forward and reads it as-is,
+    # so it shares the store. A 1.x build cannot and gets a private one.
+    if _runtime_major() < 2:
+        env["XDG_DATA_HOME"] = str(CLI_DATA_DIR)
+        step("session store", detail="private \u00b7 %s" % CLI_DATA_DIR)
+    else:
+        env.pop("XDG_DATA_HOME", None)
+        step("session store", detail="shared \u00b7 %s" % DATA_DIR_DESKTOP)
 
     ok, msg = inject_apply()
     step("instruction feed live", ok=ok, detail=msg)
@@ -3799,8 +3805,9 @@ def launch_cli() -> None:
         'set "http_proxy=%s"' % proxy_url,
         'set "NO_PROXY=127.0.0.1,localhost,::1"',
         'set "no_proxy=127.0.0.1,localhost,::1"',
-        'set "XDG_DATA_HOME=%s"' % CLI_DATA_DIR,
     ]
+    if _runtime_major() < 2:
+        lines.append('set "XDG_DATA_HOME=%s"' % CLI_DATA_DIR)
     if strict_mode():
         lines.append('set "OUC_STRICT_PROXY=1"')
     lines += [
@@ -3841,14 +3848,17 @@ def launch_cli() -> None:
 def _source_runtime() -> Path | None:
     """Vendor opencode.exe that the staged copy is built from.
 
-    The standalone CLI install is preferred: it is the build the wordmark
-    locators were verified against. The desktop bundle ships a different
-    `opencode-cli.exe` (a newer major), which is only a fallback.
+    The desktop-managed CLI comes first: it is the build the app itself runs,
+    it is the newest one on disk, and it is the one whose database the staged
+    copy has to be able to read. The standalone `~/.opencode/bin` install is
+    the fallback -- it is frequently an old 1.x that predates the current
+    schema, and staging it strands the CLI on a database it cannot open.
     """
-    candidates = [Path.home() / ".opencode" / "bin" / "opencode.exe"]
+    candidates: list[Path] = []
     cli = find_opencode_cli()
     if cli:
         candidates.append(Path(cli))
+    candidates.append(Path.home() / ".opencode" / "bin" / "opencode.exe")
     for path in candidates:
         try:
             if path.is_file():
@@ -3856,6 +3866,18 @@ def _source_runtime() -> Path | None:
         except OSError:
             continue
     return None
+
+
+def _runtime_major() -> int:
+    """Major version of the staged runtime, 0 when it cannot be read."""
+    text = _runtime_version()
+    for token in text.replace("v", " ").split():
+        if token[:1].isdigit():
+            try:
+                return int(token.split(".")[0])
+            except ValueError:
+                continue
+    return 0
 
 
 def _reset_version_cache() -> None:
@@ -4643,7 +4665,7 @@ def install_launchers() -> tuple[bool, str]:
             CLI_DATA_DIR.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
-        cli_extra = ['set "XDG_DATA_HOME=%s"' % CLI_DATA_DIR]
+        cli_extra = ['set "XDG_DATA_HOME=%s"' % CLI_DATA_DIR] if _runtime_major() < 2 else []
         changed |= _write_if_changed(
             SHIM_DIR / "zzzcode-cli.cmd",
             _shim_text('"%s"' % PATCHED, extra=cli_extra),

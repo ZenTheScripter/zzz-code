@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 import shutil
 import socket
 import sys
@@ -218,8 +219,17 @@ def main() -> int:
 
     which_oc = shutil.which("opencode")
     expected_shim = str(BIN_DIR / "opencode.cmd").lower()
+    # The ZzZ Code shim sits ahead of this bin on PATH by design: `opencode` has
+    # to reach the rebranded runtime, not the vendor one. Both are correct.
+    zzz_shim_dir = str(
+        Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        / "ZzZCode" / "cli"
+    ).lower()
+    resolved_under_zzz = bool(which_oc) and which_oc.lower().startswith(zzz_shim_dir)
     if which_oc and which_oc.lower() == expected_shim:
         _ok(f"opencode on PATH -> lane ({which_oc})")
+    elif resolved_under_zzz:
+        _ok(f"opencode on PATH -> ZzZ Code runtime ({which_oc})")
     elif which_oc:
         _warn(f"opencode on PATH resolves to {which_oc} instead of {BIN_DIR / 'opencode.cmd'} — open a new terminal or move {BIN_DIR} earlier in PATH")
     else:

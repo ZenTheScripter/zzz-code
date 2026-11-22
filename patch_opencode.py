@@ -53,8 +53,12 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: %s" % exc, file=sys.stderr)
         return 1
 
+    print("  layout %s" % report.profile)
     print("  logo   blob %d bytes (pad %d)" % (report.logo_bytes, report.logo_pad))
-    print("  banner blob %d bytes (pad %d)" % (report.banner_bytes, report.banner_pad))
+    if report.banner_bytes:
+        print("  banner blob %d bytes (pad %d)" % (report.banner_bytes, report.banner_pad))
+    else:
+        print("  banner not present in this build")
     print("  size   %d bytes (unchanged)" % report.size)
     print("  sha256 %s" % report.sha256)
     print("done.")

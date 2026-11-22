@@ -235,11 +235,12 @@ installs it through `winget` if it is missing.
 
 ## Known limits
 
-- The CLI keeps its own session database in `%USERPROFILE%\.zzzcode\data`. The staged
-  runtime is a 1.x build and the desktop app ships a 2.x CLI that migrates
-  `~/.local/share/opencode` forward; pointing the older binary at that directory makes it
-  abort. `Settings > ZzZ Code > Diagnostics` reports which store is in use under
-  `cli store`.
+- The CLI runs the same runtime the desktop app ships, so it reads the same
+  `~/.local/share/opencode` database and shares your session history. When the staged
+  runtime is an older 1.x that cannot read a migrated 2.x database, the launcher detects
+  the major version and points the CLI at a private store in
+  `%USERPROFILE%\.zzzcode\data` instead. `Settings > ZzZ Code > Diagnostics` reports
+  which store is in use under `cli store`.
 - The local bridge is HTTP on loopback, no auth. Any local process can talk to it while
   a session runs. It is a desktop convenience, not a service.
 - Reverse proxies and corporate TLS interception can break the pinned lane. `v` in the
