@@ -108,6 +108,13 @@ PATCHED = WORK_BIN / "zzzcode.exe"     # what the launcher actually runs
 LEGACY_PATCHED = APP_ROOT / "bin" / "zzzcode.exe"
 
 STATE_DIR = Path.home() / ".zzzcode"
+# The staged runtime is a 1.x build; the desktop app ships a 2.x CLI that owns
+# ~/.local/share/opencode and migrates its database forward. Sharing that
+# directory makes the staged CLI abort with "Database is not empty and has no
+# session table", so the CLI keeps its own XDG data root.
+CLI_DATA_DIR = STATE_DIR / "data"
+DATA_DIR_DESKTOP = Path.home() / ".local" / "share" / "opencode"
+STORE_DESKTOP_DB = DATA_DIR_DESKTOP / "opencode.db"
 STATE_FILE = STATE_DIR / "state.json"
 INJECT_CFG = STATE_DIR / "inject.json"
 WORKERS_FILE = STATE_DIR / "workers.json"
@@ -2978,6 +2985,21 @@ def diagnostics() -> dict:
     except Exception:
         runtime = "?"
 
+    # The staged 1.x CLI cannot read the 2.x database the desktop app migrates
+    # forward, which surfaces to the user as a bare "Unexpected error". Report
+    # both stores so that mismatch is visible instead of silent.
+    try:
+        store_desktop = str(DATA_DIR_DESKTOP)
+        store_cli = str(CLI_DATA_DIR)
+        if STORE_DESKTOP_DB.is_file() and CLI_DATA_DIR.is_dir():
+            store = "split - CLI keeps %s" % store_cli
+        elif STORE_DESKTOP_DB.is_file():
+            store = "shared - %s" % store_desktop
+        else:
+            store = "fresh - %s" % store_cli
+    except Exception:
+        store = "unknown"
+
     return {
         "ok": True,
         "version": APP_VERSION,
@@ -2989,6 +3011,7 @@ def diagnostics() -> dict:
         "themes": themes,
         "workers": ", ".join(workers),
         "agents": agents,
+        "cli_store": store,
         "crash_log": str(CRASH_LOG) if CRASH_LOG.is_file() else "",
         "last_crash": last,
     }
@@ -3750,6 +3773,16 @@ def launch_cli() -> None:
     if strict_mode():
         env["OUC_STRICT_PROXY"] = "1"
 
+    try:
+        CLI_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        step("could not create the CLI data root: %s" % exc, ok=False)
+        srv.shutdown()
+        srv.server_close()
+        return
+    env["XDG_DATA_HOME"] = str(CLI_DATA_DIR)
+    step("session store", detail=str(CLI_DATA_DIR))
+
     ok, msg = inject_apply()
     step("instruction feed live", ok=ok, detail=msg)
 
@@ -3766,6 +3799,7 @@ def launch_cli() -> None:
         'set "http_proxy=%s"' % proxy_url,
         'set "NO_PROXY=127.0.0.1,localhost,::1"',
         'set "no_proxy=127.0.0.1,localhost,::1"',
+        'set "XDG_DATA_HOME=%s"' % CLI_DATA_DIR,
     ]
     if strict_mode():
         lines.append('set "OUC_STRICT_PROXY=1"')
@@ -4528,10 +4562,13 @@ def _write_if_changed(path: Path, text: str) -> bool:
         return False
 
 
-def _shim_text(target: str, args: str = "") -> str:
+def _shim_text(target: str, args: str = "", extra: list[str] | None = None) -> str:
     exe = target if target.startswith('"') else '"%s"' % target
     line = exe + ((" " + args) if args else "") + " %*"
-    return "@echo off\nrem ZzZ Code - rewritten on every boot, edit the app instead.\n%s\n" % line
+    body = ["@echo off", "rem ZzZ Code - rewritten on every boot, edit the app instead."]
+    body.extend(extra or [])
+    body.append(line)
+    return "\n".join(body) + "\n"
 
 
 def _path_ensure(folder: Path) -> bool:
@@ -4602,8 +4639,20 @@ def install_launchers() -> tuple[bool, str]:
     for name in ("zzzcode.cmd", "zzz.cmd", "zzz-code.cmd"):
         changed |= _write_if_changed(SHIM_DIR / name, _shim_text(target, args))
     if PATCHED.is_file():
+        try:
+            CLI_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        cli_extra = ['set "XDG_DATA_HOME=%s"' % CLI_DATA_DIR]
         changed |= _write_if_changed(
-            SHIM_DIR / "zzzcode-cli.cmd", _shim_text('"%s"' % PATCHED)
+            SHIM_DIR / "zzzcode-cli.cmd",
+            _shim_text('"%s"' % PATCHED, extra=cli_extra),
+        )
+        # `opencode` is what the README promises and what a hand reaches for.
+        # SHIM_DIR sits ahead of the vendor bins on PATH, so this wins.
+        changed |= _write_if_changed(
+            SHIM_DIR / "opencode.cmd",
+            _shim_text('"%s"' % PATCHED, extra=cli_extra),
         )
     changed |= _path_ensure(SHIM_DIR)
 

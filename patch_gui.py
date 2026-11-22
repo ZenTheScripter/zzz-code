@@ -843,6 +843,7 @@ GUI_JS = r"""(function () {
         ["desktop", "desktop"],
         ["themes", "themes"],
         ["workers", "workers"],
+        ["cli_store", "cli store"],
         ["agents", "AGENTS.md"],
         ["crash_log", "crash log"]
       ];
