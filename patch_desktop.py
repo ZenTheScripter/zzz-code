@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebrand the OpenCode desktop pixel wordmark to ZZZCODE, in place.
+"""Rebrand the OpenCode desktop wordmark to ZZZCODE, in place.
 
 Two separate inline SVGs live in the renderer bundle
 (`out/renderer/assets/main-*.js` inside `app.asar`):

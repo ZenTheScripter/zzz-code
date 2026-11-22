@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZzZ Code -- opencode.exe pixel-art rebrand engine.
+ZzZ Code -- opencode.exe rebrand engine.
 
 bun standalone executables carry an index of module byte-offsets in their
 trailer. Any byte inserted or removed invalidates every offset after the edit,

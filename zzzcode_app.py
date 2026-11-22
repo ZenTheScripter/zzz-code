@@ -3,7 +3,7 @@
 ZzZ Code -- console-only launcher for the rebranded opencode runtime.
 
 Pure console. No WebView, no GUI surface. It stages `zzzcode.exe` (a
-length-preserving pixel-art patched copy of opencode.exe) under local app data,
+length-preserving rebranded copy of opencode.exe) under local app data,
 reuses the OpenCode-Unlimited WARP / /64-rotation stack recovered from the
 shipped control-center build, and exposes the same toggles through a text menu.
 
