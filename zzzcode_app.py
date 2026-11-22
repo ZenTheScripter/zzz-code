@@ -1972,10 +1972,14 @@ THEMES_ACTIVE = THEMES_DIR / "active.json"
 THEMES_GUIDE = THEMES_DIR / "README.md"
 THEME_VALUE_RE = re.compile(r"^[#a-zA-Z0-9(),.% +-]{1,64}$")
 THEME_KEY_RE = re.compile(r"^--[a-zA-Z0-9-]{1,64}$")
+# A wallpaper is a CSS gradient, never an image: no URL to fetch, nothing the
+# vendor CSP has to allow, and the whole value is one auditable line. The charset
+# is the same one the colour values allow, so a theme file cannot smuggle a rule.
+THEME_WALL_RE = re.compile(r"^(?:linear|radial|conic)-gradient\([#a-zA-Z0-9(),.% +-]{1,300}\)$")
 THEME_LIMIT = 64
 
 # id, name, kind, bg, layer1..4, text, muted, faint, border, strong,
-# accent-bg, accent-text, accent-hover
+# accent-bg, accent-text, accent-hover, optional wallpaper gradient
 _BUILTIN_THEMES = (
     ("noir", "ZzZ Noir", "dark", "#161616", "#1d1d1d", "#242424", "#2e2e2e", "#3a3a3a",
      "#fafafa", "#aeaeae", "#7a7a7a", "#2a2a2a", "#3a3a3a", "#4b8fd0", "#a2bcff", "#c7d7ff"),
@@ -2047,12 +2051,57 @@ _BUILTIN_THEMES = (
      "#ffd79a", "#d3a960", "#94743c", "#33270b", "#44340f", "#a86b12", "#ffb64d", "#ffd27f"),
     ("graphite", "Graphite", "dark", "#1a1a1c", "#202023", "#27272b", "#313136", "#3d3d43",
      "#e8e8ea", "#a5a5ad", "#75757e", "#313136", "#3d3d43", "#5a5a66", "#b9b9c6", "#d3d3dd"),
+    ("void", "Void", "dark", "#08080b", "#0d0d12", "#12121a", "#191924", "#222230",
+     "#ececf5", "#a0a0bb", "#6a6a86", "#1e1e2a", "#2b2b3c", "#6b46ff", "#b2a1ff", "#cdc2ff",
+     "radial-gradient(120% 90% at 15% 0%, #24103f 0%, #08080b 62%)"),
+    ("moss-stone", "Moss Stone", "dark", "#12150f", "#181c14", "#1f241a", "#272e21", "#323a2a",
+     "#e4e8d8", "#b0b8a0", "#7d876f", "#272e21", "#3a4432", "#5d7a3a", "#b7d08f", "#cfe4ad"),
+    ("sandstorm", "Sandstorm", "light", "#f7f1e6", "#f0e9db", "#e7ded0", "#dbd0bf", "#cbbda8",
+     "#2b2620", "#6b6255", "#948a79", "#ddd2c0", "#c6b8a2", "#b07a3a", "#8a5a22", "#6f4616"),
+    ("cobalt", "Cobalt", "dark", "#0a1220", "#101a2c", "#152238", "#1b2c47", "#243a5c",
+     "#e3ecff", "#9db2d4", "#68809f", "#1b2c47", "#2b4166", "#1f5fbf", "#7fb2ff", "#a6caff"),
+    ("ember", "Ember", "dark", "#140a08", "#1c100c", "#251610", "#301d15", "#3f271b",
+     "#ffe9dd", "#d8ac96", "#a37a65", "#301d15", "#4a2f21", "#b8471f", "#ff9a63", "#ffb98c",
+     "radial-gradient(130% 100% at 80% 110%, #5a1a08 0%, #140a08 60%)"),
+    ("phosphor", "Phosphor", "dark", "#04100a", "#071a11", "#0a2418", "#0f3020", "#14402b",
+     "#d6ffd9", "#93d39b", "#4f8f5c", "#0f3020", "#1b5233", "#17914a", "#4dff8f", "#8dffb8"),
+    ("parchment", "Parchment", "light", "#f6efdd", "#efe6cf", "#e6dabf", "#dacbad", "#c8b492",
+     "#2a2418", "#6a5f47", "#94886c", "#ddcfb2", "#c3b18d", "#8a6a2a", "#6d4f14", "#523a0c"),
+    ("abyss", "Abyss", "dark", "#04161a", "#072128", "#0b2c35", "#103a46", "#174c5b",
+     "#d8f6ff", "#8fc3d0", "#548491", "#103a46", "#1c5a6b", "#12808f", "#4fe3f0", "#8df2fb",
+     "linear-gradient(160deg, #0a3540 0%, #04161a 55%, #1a0b2a 100%)"),
+    ("orchid", "Orchid", "dark", "#150e18", "#1d1421", "#26192c", "#32203a", "#42294d",
+     "#f7e8ff", "#c9a8dc", "#8f6fa3", "#32203a", "#4b3060", "#8a3fb0", "#e5a6ff", "#f2caff"),
+    ("high-contrast", "High Contrast", "dark", "#000000", "#0a0a0a", "#121212", "#1c1c1c", "#282828",
+     "#ffffff", "#c8c8c8", "#8a8a8a", "#303030", "#4a4a4a", "#0055ff", "#66a3ff", "#a3c7ff"),
+    ("slate-light", "Slate Light", "light", "#f6f8fa", "#eef1f4", "#e4e8ec", "#d7dde3", "#c5ccd4",
+     "#171b1f", "#4f5862", "#7b8794", "#d7dde3", "#bcc5ce", "#2f6f9f", "#1f5b86", "#164568"),
+    ("crimson", "Crimson", "dark", "#140708", "#1d0b0d", "#261013", "#331619", "#432023",
+     "#ffe4e4", "#d9a2a4", "#9d6a6c", "#331619", "#4f2427", "#a01a22", "#ff6b72", "#ff9ba0"),
+    ("frostbite", "Frostbite", "light", "#eef6fb", "#e3eef6", "#d5e5f0", "#c3d8e8", "#aec8dc",
+     "#10222e", "#46647a", "#6f8ba1", "#c3d8e8", "#a3bdd2", "#2b7fa8", "#1e6b8f", "#14536f"),
+    ("sunset-drive", "Sunset Drive", "dark", "#150b14", "#1d101b", "#271523", "#331b2d", "#43243a",
+     "#ffe6f2", "#d3a3bd", "#96687f", "#331b2d", "#4d2b41", "#c0306f", "#ff86bd", "#ffb0d6",
+     "linear-gradient(180deg, #2a0f3f 0%, #6b1f45 45%, #f0824a 100%)"),
+    ("obsidian", "Obsidian", "dark", "#101010", "#161616", "#1d1d1d", "#262626", "#323232",
+     "#ede9e3", "#b3aca3", "#7d766e", "#262626", "#3a3a3a", "#8a6d3b", "#d8b578", "#ecd09b"),
+    ("limewire", "Limewire", "dark", "#0a1004", "#0f1807", "#15200b", "#1c2b10", "#263a17",
+     "#eeffd8", "#b6d48c", "#7a9c58", "#1c2b10", "#2f4a1c", "#4f9a10", "#a4f050", "#c6ff85",
+     "radial-gradient(110% 80% at 8% 100%, #1e3a06 0%, #0a1004 58%)"),
 )
+
+
+def _clean_wall(raw: object) -> str:
+    if not isinstance(raw, str):
+        return ""
+    value = raw.strip()
+    return value if THEME_WALL_RE.match(value) else ""
 
 
 def _theme_from_row(row: tuple) -> dict:
     (tid, name, kind, bg, l1, l2, l3, l4, text, muted, faint,
-     border, strong, acc_bg, acc_text, acc_hover) = row
+     border, strong, acc_bg, acc_text, acc_hover) = row[:16]
+    wall = _clean_wall(row[16]) if len(row) > 16 else ""
     colors = {
         "--v2-background-bg-base": bg,
         "--v2-background-bg-layer-01": l1,
@@ -2080,7 +2129,7 @@ def _theme_from_row(row: tuple) -> dict:
         "--v2-blue-500": acc_bg,
         "--v2-blue-600": acc_bg,
     }
-    return {"id": tid, "name": name, "kind": kind, "author": "zzz", "colors": colors}
+    return {"id": tid, "name": name, "kind": kind, "author": "zzz", "colors": colors, "wall": wall}
 
 
 def _clean_colors(raw: object) -> dict:
@@ -2122,6 +2171,7 @@ def _user_themes() -> list[dict]:
             "kind": str(data.get("kind") or "custom")[:12],
             "author": author,
             "colors": colors,
+            "wall": _clean_wall(data.get("wall")),
         })
     return found
 
@@ -2166,7 +2216,12 @@ def themes_apply(tid: str) -> tuple[bool, dict]:
         )
     except OSError as exc:
         return False, {"detail": "write failed: %s" % str(exc)[:48]}
-    return True, {"detail": theme["name"], "id": theme["id"], "colors": theme["colors"]}
+    return True, {
+        "detail": theme["name"],
+        "id": theme["id"],
+        "colors": theme["colors"],
+        "wall": theme.get("wall", ""),
+    }
 
 
 def themes_reset() -> tuple[bool, dict]:
@@ -2187,6 +2242,10 @@ TEMPLATE_THEME = {
     "name": "My Theme",
     "author": "you",
     "kind": "dark",
+    # Optional: one CSS gradient, painted as a soft wash over the whole window.
+    # Anything that is not `linear-`, `radial-` or `conic-gradient(...)` is
+    # ignored on load, so a typo costs the wash and nothing else.
+    "wall": "radial-gradient(120% 90% at 15% 0%, #24103f 0%, #0f1117 62%)",
     "colors": {
         "--v2-background-bg-base": "#0f1117",
         "--v2-background-bg-deep": "#0b0d12",
@@ -2270,6 +2329,7 @@ That is the whole format. `name` is what the tab shows, `author` is free text,
 | `name` | no | string | tab label, 48 chars max, falls back to the filename |
 | `author` | no | string | 32 chars max, shown in the swatch tooltip |
 | `kind` | no | string | `light`, `dark`, `custom`; drives `color-scheme` and the scrollbars |
+| `wall` | no | string | one CSS gradient, painted as a soft wash over the window |
 | `colors` | yes | object | at least one entry, keys start with `--` |
 
 Unknown top-level keys are ignored, so a file can carry a `notes` field for
@@ -2322,6 +2382,24 @@ of trouble:
 Values must be plain CSS (hex, `rgb()`, `hsl()`, `var(--something)`); anything
 with `;`, `}`, `<`, `>` or a newline is stripped by the loader, so a theme
 cannot break out of its declaration.
+
+## Wallpapers
+
+`wall` is optional and carries one CSS gradient instead of an image file, which
+is why no theme needs an asset and nothing has to be fetched at paint time:
+
+```json
+"wall": "radial-gradient(120% 90% at 15% 0%, #24103f 0%, #0f1117 62%)"
+```
+
+- Accepted forms are `linear-gradient(...)`, `radial-gradient(...)` and
+  `conic-gradient(...)`, nothing else.
+- It is painted on a fixed layer above the interface at 22 percent opacity with
+  `soft-light` blending, so it reads as a tint and never hides text.
+- The layer ignores clicks; buttons, rows and scrollbars behave exactly as
+  before.
+- An invalid value loses the wash and keeps the palette - a typo is never fatal.
+- Five builtins ship one: `void`, `ember`, `abyss`, `sunset-drive`, `limewire`.
 
 ## Reading the palette, layer by layer
 
@@ -2453,13 +2531,17 @@ swatch again. There is no cache to clear.
 
 ## Shipping a theme with the build
 
-The 35 builtin palettes live in `zzzcode_app.py` as `_BUILTIN_THEMES`, one row
+The 52 builtin palettes live in `zzzcode_app.py` as `_BUILTIN_THEMES`, one row
 per theme:
 
 ```
 (id, name, kind, bg, layer1, layer2, layer3, layer4,
- text, muted, faint, border, strong, accent_bg, accent_text, accent_hover)
+ text, muted, faint, border, strong, accent_bg, accent_text, accent_hover,
+ wall?)
 ```
+
+`wall` is the seventeenth field and optional: leave it out and the theme is a flat
+palette, add a gradient and it gets the wash described above.
 
 `_theme_from_row()` expands a row into the full twenty-six-key colour map, which
 is why a builtin sets the whole surface set and a user file can set as few keys
@@ -2838,9 +2920,303 @@ def updates_spawn_check() -> None:
 # posts here and the launcher rewrites the config document. GET answers the real
 # state, so a fresh renderer with empty localStorage still shows the truth.
 #
-# Routes: `/state` (persona feed), `/folders`, `/jailbreak`, `/themes*` and
-# `/update*`. Unknown paths are a 404 so a stale renderer fails loudly instead of
-# silently treating an error page as state.
+# Routes: `/state` (persona feed), `/folders`, `/jailbreak`, `/themes*`,
+# `/update*`, `/diagnostics`, `/crash/*`, `/stack/verify`, `/workers/restart`
+# and `/templates/*`. Unknown paths are a 404 so a stale renderer fails loudly
+# instead of silently treating an error page as state.
+
+CRASH_LOG = STATE_DIR / "crash.log"
+
+
+def diagnostics() -> dict:
+    """One flat snapshot for the settings panel and for a bug report.
+
+    Every value is read defensively: the panel renders whatever this returns, so
+    a missing WARP, a half-installed desktop or a locked crash log degrades to a
+    string instead of taking the bridge down.
+    """
+    last = ""
+    try:
+        if CRASH_LOG.is_file():
+            first = CRASH_LOG.read_text(encoding="utf-8", errors="replace").strip()
+            last = first.splitlines()[0][:140] if first else ""
+    except OSError:
+        last = ""
+
+    agents = "none"
+    try:
+        found = find_agents_md()
+        if found is not None:
+            agents = str(found)
+    except Exception:
+        agents = "unreadable"
+
+    workers = []
+    for name in ("keeper", "guard"):
+        try:
+            workers.append("%s %s" % (name, "up" if worker_running(name) else "down"))
+        except Exception:
+            workers.append("%s ?" % name)
+
+    desktop = "not installed"
+    try:
+        from patch_desktop import asar_state
+
+        state = asar_state()
+        if state.get("available"):
+            desktop = "patched" if state.get("patched") else "stock"
+    except Exception:
+        desktop = "unknown"
+
+    try:
+        themes = len(themes_list().get("themes") or [])
+    except Exception:
+        themes = 0
+
+    try:
+        runtime = _runtime_version()
+    except Exception:
+        runtime = "?"
+
+    return {
+        "ok": True,
+        "version": APP_VERSION,
+        "bundle": "frozen" if FROZEN else "source",
+        "python": ".".join(str(part) for part in sys.version_info[:3]),
+        "port": BRIDGE_PORT,
+        "opencode": runtime,
+        "desktop": desktop,
+        "themes": themes,
+        "workers": ", ".join(workers),
+        "agents": agents,
+        "crash_log": str(CRASH_LOG) if CRASH_LOG.is_file() else "",
+        "last_crash": last,
+    }
+
+
+def crash_open() -> tuple[bool, dict]:
+    if not CRASH_LOG.is_file():
+        return False, {"detail": "no crash log on disk"}
+    try:
+        os.startfile(str(CRASH_LOG))  # noqa: S606 - user-facing, opens in the editor
+    except Exception as exc:
+        return False, {"detail": str(exc)[:64]}
+    return True, {"detail": str(CRASH_LOG)}
+
+
+def crash_clear() -> tuple[bool, dict]:
+    try:
+        CRASH_LOG.unlink(missing_ok=True)
+    except OSError as exc:
+        return False, {"detail": str(exc)[:64]}
+    return True, {"detail": "crash log cleared"}
+
+
+def stack_verify() -> tuple[bool, dict]:
+    """Read the stack without repairing it.
+
+    `stack_ensure` rerolls the edge and rotates the /64, which is a repair pass
+    and takes tens of seconds; the panel button only needs to say what is up.
+    """
+    try:
+        v6 = get_warp_local_v6()
+    except Exception:
+        v6 = None
+    block = normalize_v6_64(v6) if v6 else ""
+    keeper_up = False
+    try:
+        keeper_up = port_open(keeper_port())
+    except Exception:
+        keeper_up = False
+    guard_up = False
+    try:
+        guard_up = worker_running("guard")
+    except Exception:
+        guard_up = False
+
+    ok = bool(block) and keeper_up and guard_up
+    missing = []
+    if not block:
+        missing.append("warp /64")
+    if not keeper_up:
+        missing.append("keeper port")
+    if not guard_up:
+        missing.append("guard")
+    detail = "all up" if ok else "missing: " + ", ".join(missing)
+
+    try:
+        runtime = _runtime_version()
+    except Exception:
+        runtime = "?"
+
+    return ok, {
+        "ok": ok,
+        "detail": detail,
+        "lane": block or "none",
+        "keeper": keeper_up,
+        "guard": guard_up,
+        "opencode": runtime,
+        "desktop": diagnostics().get("desktop", "unknown"),
+    }
+
+
+def workers_restart() -> tuple[bool, dict]:
+    """Stop then start keeper and guard, in that order, and report each stage."""
+    notes = []
+    ok = True
+    for name in ("keeper", "guard"):
+        try:
+            if worker_running(name):
+                worker_stop(name)
+                notes.append("%s stopped" % name)
+        except Exception as exc:
+            ok = False
+            notes.append("%s stop failed: %s" % (name, str(exc)[:32]))
+        try:
+            started, why = worker_start(name)
+            if not started:
+                ok = False
+            notes.append(why)
+        except Exception as exc:
+            ok = False
+            notes.append("%s start failed: %s" % (name, str(exc)[:32]))
+    return ok, {"detail": " \u00b7 ".join(notes)}
+
+
+# ---------------------------------------------------------------- templates
+#
+# Snippets appended to the project's AGENTS.md from the settings panel. They are
+# plain text on purpose: the same bytes a reader would paste by hand, so nothing
+# in this table can surprise a reviewer, and the append is idempotent per title.
+
+TEMPLATE_PACK = (
+    (
+        "focused-edits",
+        "Focused edits",
+        "Touch only the lines the task names",
+        "- Edit only what the task names. No drive-by renames, no reformatting of\n"
+        "  untouched lines, no dependency bumps that were not asked for.\n"
+        "- If a fix needs a wider change, say so in one line before making it.\n",
+    ),
+    (
+        "verify-before-claim",
+        "Verify before claiming done",
+        "Run it, then say it runs",
+        "- Never report work as finished without running it: the build, the test,\n"
+        "  the command, the page.\n"
+        "- If something could not be run, say which part and why, in one line.\n",
+    ),
+    (
+        "no-new-deps",
+        "No new dependencies",
+        "Ask before adding a package",
+        "- Do not add a dependency without asking. Prefer the standard library.\n"
+        "- If a dependency is unavoidable, name the version and the reason.\n",
+    ),
+    (
+        "small-diffs",
+        "Small diffs",
+        "One concern per change",
+        "- One concern per change. Split unrelated cleanup into its own commit.\n"
+        "- Keep a diff readable in one screen where the task allows it.\n",
+    ),
+    (
+        "plan-first",
+        "Plan first",
+        "Five lines before multi-file work",
+        "- For anything touching more than two files, write a five-line plan first:\n"
+        "  files to change, order, verification step.\n",
+    ),
+    (
+        "no-placeholders",
+        "No placeholders",
+        "No TODO, no stub, no ellipsis",
+        "- No TODO, no stub, no `...`, no \"implementation left as an exercise\".\n"
+        "- If a value is unknown, mark it as a FILL and say where it comes from.\n",
+    ),
+    (
+        "french-replies",
+        "French replies, English code",
+        "Explain in French, ship code in English",
+        "- Answer in French. Keep code, identifiers, file names and commit messages\n"
+        "  in English.\n",
+    ),
+    (
+        "commit-style",
+        "Conventional commits",
+        "type(scope): summary",
+        "- Commit messages follow `type(scope): summary`, imperative, under 72\n"
+        "  characters. Body only when the why is not obvious.\n",
+    ),
+    (
+        "security-pass",
+        "Security pass",
+        "Validate input, never log secrets",
+        "- Validate every external input at the boundary; treat lengths as hostile.\n"
+        "- Never log tokens, keys, cookies or full request bodies.\n",
+    ),
+    (
+        "perf-budget",
+        "Performance budget",
+        "Numbers, not adjectives",
+        "- State performance in numbers (p99, allocation size, query count). No\n"
+        "  \"fast\", no \"should be fine\".\n",
+    ),
+    (
+        "docs-adjacent",
+        "Docs follow behaviour",
+        "Update README with the change",
+        "- Any change in behaviour updates the README section that describes it, in\n"
+        "  the same commit.\n",
+    ),
+    (
+        "windows-shell",
+        "PowerShell 5.1 safe",
+        "No `&&`, no `2>$null`",
+        "- Shell snippets must run on Windows PowerShell 5.1: no `&&`, no `> $null`,\n"
+        "  no `2>$null`, use `-Encoding UTF8` not `utf-8`.\n",
+    ),
+)
+
+
+def templates_list() -> dict:
+    return {
+        "ok": True,
+        "templates": [
+            {"id": tid, "name": name, "note": note, "body": body}
+            for tid, name, note, body in TEMPLATE_PACK
+        ],
+    }
+
+
+def templates_save(tid: str) -> tuple[bool, dict]:
+    """Append one template to the project's AGENTS.md, once."""
+    entry = None
+    for row in TEMPLATE_PACK:
+        if row[0] == tid:
+            entry = row
+            break
+    if entry is None:
+        return False, {"detail": "no template %s" % tid}
+
+    target = find_agents_md()
+    if target is None:
+        target = APP_ROOT / "AGENTS.md"
+    heading = "## Template: %s" % entry[1]
+    try:
+        existing = target.read_text(encoding="utf-8") if target.is_file() else ""
+    except OSError as exc:
+        return False, {"detail": "read failed: %s" % str(exc)[:48]}
+    if heading in existing:
+        return True, {"detail": "already in %s" % target.name}
+
+    block = "" if not existing or existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
+    try:
+        with target.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write("%s%s\n%s\n" % (block, heading, entry[3]))
+    except OSError as exc:
+        return False, {"detail": "write failed: %s" % str(exc)[:48]}
+    return True, {"detail": "%s appended to %s" % (entry[1], target.name)}
 
 
 class _BridgeHandler(BaseHTTPRequestHandler):
@@ -2873,6 +3249,12 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             return
         if route == "/themes":
             self._reply(200, themes_list())
+            return
+        if route == "/diagnostics":
+            self._reply(200, diagnostics())
+            return
+        if route == "/templates/list":
+            self._reply(200, templates_list())
             return
         if route == "/update/status":
             self._reply(200, update_status())
@@ -2910,6 +3292,27 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         if route == "/themes/new":
             ok, payload = themes_new()
             self._reply(200 if ok else 500, dict(payload, ok=ok))
+            return
+        if route == "/crash/open":
+            ok, payload = crash_open()
+            self._reply(200 if ok else 404, dict(payload, ok=ok))
+            return
+        if route == "/crash/clear":
+            ok, payload = crash_clear()
+            self._reply(200 if ok else 500, dict(payload, ok=ok))
+            return
+        if route == "/stack/verify":
+            ok, payload = stack_verify()
+            self._reply(200, dict(payload, ok=ok))
+            return
+        if route == "/workers/restart":
+            ok, payload = workers_restart()
+            self._reply(200 if ok else 500, dict(payload, ok=ok))
+            return
+        if route == "/templates/save":
+            tid = str((body or {}).get("id") or "") if isinstance(body, dict) else ""
+            ok, payload = templates_save(tid)
+            self._reply(200 if ok else 400, dict(payload, ok=ok))
             return
         if route == "/update/apply":
             which = str((body or {}).get("target") or "") if isinstance(body, dict) else ""
@@ -4475,6 +4878,9 @@ def _self_dispatch(argv: list[str]) -> int | None:
             ("--firewall install|remove", "add or drop the kill-switch rule"),
             ("--warp-start", "elevate, grant, start the tunnel"),
             ("--warp-cold apply|auto", "park the service until something needs it"),
+            ("--themes", "list the theme ids and the active one"),
+            ("--theme <id>", "apply a theme without opening the window"),
+            ("--templates", "list the AGENTS.md snippets"),
             ("--desktop-restore <pid>", "restore the desktop bundle after the app exits"),
         ):
             print("  %-26s %s" % (flag, about))
@@ -4558,6 +4964,40 @@ def _self_dispatch(argv: list[str]) -> int | None:
             return 0 if (cfg_ok or start_ok) else 1
         print("usage: --warp-cold apply|auto", file=sys.stderr)
         return 2
+
+    if "--themes" in argv:
+        ensure_dirs()
+        data = themes_list()
+        active = data.get("active") or ""
+        for theme in data["themes"]:
+            mark = "*" if theme["id"] == active else " "
+            wall = " +wall" if theme.get("wall") else ""
+            print("%s %-18s %-22s %s%s" % (mark, theme["id"], theme["name"], theme["kind"], wall))
+        print()
+        print("%d themes - %s" % (len(data["themes"]), data["dir"]))
+        return 0
+
+    if "--theme" in argv:
+        idx = argv.index("--theme")
+        if idx + 1 >= len(argv):
+            print("usage: --theme <id>   (--themes lists the ids)", file=sys.stderr)
+            return 2
+        ensure_dirs()
+        ok, payload = themes_apply(argv[idx + 1])
+        if ok:
+            print("%s applied - reopen settings or reload the window" % payload.get("detail", ""))
+            return 0
+        print("no such theme: %s" % argv[idx + 1], file=sys.stderr)
+        print("run --themes for the current list", file=sys.stderr)
+        return 1
+
+    if "--templates" in argv:
+        for item in templates_list()["templates"]:
+            print("%-18s %s" % (item["id"], item["name"]))
+            print("  %s" % item["note"])
+        print()
+        print("%d templates - append one from the ZzZ Code settings tab" % len(TEMPLATE_PACK))
+        return 0
 
     return None
 

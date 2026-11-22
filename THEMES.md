@@ -44,6 +44,7 @@ That is the whole format. `name` is what the tab shows, `author` is free text,
 | `name` | no | string | tab label, 48 chars max, falls back to the filename |
 | `author` | no | string | 32 chars max, shown in the swatch tooltip |
 | `kind` | no | string | `light`, `dark`, `custom`; drives `color-scheme` and the scrollbars |
+| `wall` | no | string | one CSS gradient, painted as a soft wash over the window |
 | `colors` | yes | object | at least one entry, keys start with `--` |
 
 Unknown top-level keys are ignored, so a file can carry a `notes` field for
@@ -96,6 +97,24 @@ of trouble:
 Values must be plain CSS (hex, `rgb()`, `hsl()`, `var(--something)`); anything
 with `;`, `}`, `<`, `>` or a newline is stripped by the loader, so a theme
 cannot break out of its declaration.
+
+## Wallpapers
+
+`wall` is optional and carries one CSS gradient instead of an image file, which
+is why no theme needs an asset and nothing has to be fetched at paint time:
+
+```json
+"wall": "radial-gradient(120% 90% at 15% 0%, #24103f 0%, #0f1117 62%)"
+```
+
+- Accepted forms are `linear-gradient(...)`, `radial-gradient(...)` and
+  `conic-gradient(...)`, nothing else.
+- It is painted on a fixed layer above the interface at 22 percent opacity with
+  `soft-light` blending, so it reads as a tint and never hides text.
+- The layer ignores clicks; buttons, rows and scrollbars behave exactly as
+  before.
+- An invalid value loses the wash and keeps the palette - a typo is never fatal.
+- Five builtins ship one: `void`, `ember`, `abyss`, `sunset-drive`, `limewire`.
 
 ## Reading the palette, layer by layer
 
@@ -227,13 +246,17 @@ swatch again. There is no cache to clear.
 
 ## Shipping a theme with the build
 
-The 35 builtin palettes live in `zzzcode_app.py` as `_BUILTIN_THEMES`, one row
+The 52 builtin palettes live in `zzzcode_app.py` as `_BUILTIN_THEMES`, one row
 per theme:
 
 ```
 (id, name, kind, bg, layer1, layer2, layer3, layer4,
- text, muted, faint, border, strong, accent_bg, accent_text, accent_hover)
+ text, muted, faint, border, strong, accent_bg, accent_text, accent_hover,
+ wall?)
 ```
+
+`wall` is the seventeenth field and optional: leave it out and the theme is a flat
+palette, add a gradient and it gets the wash described above.
 
 `_theme_from_row()` expands a row into the full twenty-six-key colour map, which
 is why a builtin sets the whole surface set and a user file can set as few keys
@@ -253,7 +276,7 @@ properties on `documentElement` for the length of the session.
 
 ## Where the builtins come from
 
-`_BUILTIN_THEMES` in `zzzcode_app.py` holds 35 rows. Each row is expanded by
+`_BUILTIN_THEMES` in `zzzcode_app.py` holds 52 rows. Each row is expanded by
 `_theme_from_row()` into the full token map that the renderer paints, which is
 how a builtin covers every surface while a user file can cover two keys and
 still work.

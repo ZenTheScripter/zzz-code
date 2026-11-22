@@ -99,6 +99,63 @@ GUI_JS = r"""(function () {
   var UPD_AUTO = BRIDGE + "/update/auto";
   var UPD_CHECK = BRIDGE + "/update/check";
   var UPD_APPLY = BRIDGE + "/update/apply";
+  var DIAG = BRIDGE + "/diagnostics";
+  var CRASH_OPEN = BRIDGE + "/crash/open";
+  var CRASH_CLEAR = BRIDGE + "/crash/clear";
+  var STACK_VERIFY = BRIDGE + "/stack/verify";
+  var WORKERS_RESTART = BRIDGE + "/workers/restart";
+  var TEMPLATES = BRIDGE + "/templates/list";
+  var TEMPLATE_SAVE = BRIDGE + "/templates/save";
+  var THEME_KEY = "zzz.theme.id";
+
+  // Small shared surfaces. A toast is one reused node so spamming an action never
+  // stacks pills up the screen; the clipboard helper falls back to a hidden
+  // textarea because `navigator.clipboard` is undefined on a non-secure origin.
+  function toast(text) {
+    var node = document.querySelector("[data-zzz-toast]");
+    if (!node) {
+      node = document.createElement("div");
+      node.setAttribute("data-zzz-toast", "");
+      (document.body || ROOT).appendChild(node);
+    }
+    node.textContent = String(text || "");
+    node.setAttribute("data-show", "");
+    window.clearTimeout(node.__zzzTimer);
+    node.__zzzTimer = window.setTimeout(function () {
+      node.removeAttribute("data-show");
+    }, 1800);
+  }
+
+  function copyText(text) {
+    var done = function (ok) {
+      return ok;
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () {
+        return done(true);
+      }, function () {
+        return done(fallbackCopy(text));
+      });
+    }
+    return Promise.resolve(done(fallbackCopy(text)));
+  }
+
+  function fallbackCopy(text) {
+    try {
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      area.style.pointerEvents = "none";
+      (document.body || ROOT).appendChild(area);
+      area.select();
+      var ok = document.execCommand("copy");
+      area.remove();
+      return !!ok;
+    } catch (err) {
+      return false;
+    }
+  }
 
   // The vendor switch is `[data-component=switch]` with a 24x16 track and a
   // 12px square thumb (border-radius:2px, 3px on hover, translate(8px) when
@@ -120,7 +177,32 @@ GUI_JS = r"""(function () {
     'html [data-slot="' + SLOT + '"][data-checked] [data-slot=switch-thumb]{background:var(--v2-background-bg-accent)!important;transform:translateX(16px)!important}',
     'html [data-slot="' + SLOT + '"][data-checked]:hover [data-slot=switch-thumb]{transform:translateX(16px)!important}',
     'html [data-slot="' + SLOT + '"]:dir(rtl)[data-checked] [data-slot=switch-thumb]{transform:translateX(-16px)!important}',
-    'html [data-zzz-tab] [data-slot=tabs-v2-trigger]{display:flex;align-items:center;gap:6px;width:100%;height:100%;padding:0 6px;border:0;background:none;color:inherit;font:inherit;text-align:start;cursor:pointer}',
+    'html [data-zzz-tab] [data-slot=tabs-v2-trigger]{display:flex;align-items:center;gap:6px;width:100%;height:100%;padding:0 6px;border:0;background:none;color:inherit;font:inherit;text-align:start;cursor:inherit}',
+    'html [data-zzz-nav]{display:flex;flex-direction:column;gap:1px;margin-top:6px;padding-top:8px;border-top:1px solid var(--v2-border-border-base)}',
+    'html [data-zzz-nav-label]{padding:2px 8px 4px;font-size:10px;line-height:14px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--v2-text-text-faint)}',
+    'html [data-zzz-nav] [data-slot=tabs-v2-trigger-wrapper]{border-radius:6px}',
+    'html [data-zzz-nav] [data-slot=tabs-v2-trigger-wrapper]:has([data-selected]){background:var(--v2-background-bg-layer-03);color:var(--v2-text-text-base)}',
+    'html [data-zzz-nav] [data-slot=tabs-v2-trigger-wrapper]:not(:has([data-selected])):hover{background:var(--v2-overlay-simple-overlay-hover)}',
+    'html[data-zzz-sheet-open] .settings-nav-groups [data-slot=tabs-v2-trigger-wrapper]:has([data-selected]){background:transparent!important;color:var(--v2-text-text-muted)!important}',
+    'html [data-zzz-sheet]{box-sizing:border-box;position:fixed;z-index:40;display:none;flex-direction:column;overflow-y:auto;padding:6px 8px 18px;background:var(--v2-background-bg-base);scrollbar-width:none}',
+    'html [data-zzz-sheet][data-open]{display:flex}',
+    'html [data-zzz-sheet]::-webkit-scrollbar{display:none}',
+    'html [data-zzz-sheet]>.settings-panel{height:auto;min-height:0;flex:0 0 auto;overflow:visible;padding-inline:0}',
+    'html [data-zzz-search]{height:30px;padding:0 10px;border:1px solid var(--v2-border-border-base);border-radius:6px;background:var(--v2-background-bg-layer-01);color:var(--v2-text-text-base);font:inherit;font-size:12px;width:100%}',
+    'html [data-zzz-search]:focus{outline:none;border-color:var(--v2-border-border-focus)}',
+    'html [data-zzz-banner]{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid var(--v2-border-border-base);border-radius:8px;background:var(--v2-background-bg-layer-01);text-decoration:none;color:var(--v2-text-text-base)}',
+    'html [data-zzz-banner]:hover{background:var(--v2-background-bg-layer-02);border-color:var(--v2-border-border-strong)}',
+    'html [data-zzz-banner] b{font-size:12px;font-weight:600}',
+    'html [data-zzz-banner] span{font-size:11px;line-height:15px;color:var(--v2-text-text-faint)}',
+    'html [data-zzz-banner-mark]{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;background:var(--v2-background-bg-accent);color:var(--v2-text-text-contrast);font-size:12px;font-weight:700;flex:0 0 auto}',
+    'html [data-zzz-template]{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px solid var(--v2-border-border-base)}',
+    'html [data-zzz-template]:last-child{border-bottom:0}',
+    'html [data-zzz-template-head]{display:flex;align-items:center;justify-content:space-between;gap:10px}',
+    'html [data-zzz-template-name]{font-size:12px;font-weight:550;color:var(--v2-text-text-base)}',
+    'html [data-zzz-template-note]{font-size:11px;line-height:15px;color:var(--v2-text-text-faint)}',
+    'html [data-zzz-kbd]{display:inline-block;padding:1px 5px;border:1px solid var(--v2-border-border-base);border-radius:4px;font-family:ui-monospace,monospace;font-size:10px;color:var(--v2-text-text-muted)}',
+    'html [data-zzz-toast]{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:2147483002;padding:8px 14px;border:1px solid var(--v2-border-border-strong);border-radius:999px;background:var(--v2-background-bg-layer-02);color:var(--v2-text-text-base);font-size:12px;box-shadow:0 10px 30px rgba(0,0,0,.32);opacity:0;transition:opacity 140ms ease}',
+    'html [data-zzz-toast][data-show]{opacity:1}',
     'html [data-zzz-tab] [data-slot=tabs-v2-trigger] svg{flex:0 0 auto}',
     'html [data-zzz-panel]{display:flex!important;flex-direction:column;gap:14px;min-height:0;overflow-y:auto}',
     'html [data-zzz-panel][hidden]{display:none!important}',
@@ -147,9 +229,10 @@ GUI_JS = r"""(function () {
     'html [data-zzz-swatch-preview]{display:flex;flex-direction:column;gap:3px;height:40px;padding:5px;border-radius:5px;overflow:hidden}',
     'html [data-zzz-swatch-preview] span{display:block;height:4px;border-radius:2px}',
     'html [data-zzz-swatch-name]{font-size:11px;line-height:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-    'html [data-zzz-pill]{position:fixed;top:10px;right:12px;z-index:2147483000;display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 10px;border:1px solid var(--v2-border-border-strong);border-radius:999px;background:var(--v2-background-bg-layer-02);color:var(--v2-text-text-base);font-size:11px;font-weight:600;letter-spacing:.01em;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.22);transition:background 120ms ease,transform 120ms ease}',
-    'html [data-zzz-pill]:hover{background:var(--v2-background-bg-layer-03);transform:translateY(-1px)}',
-    'html [data-zzz-pill] i{display:block;width:7px;height:7px;border-radius:50%;background:var(--v2-background-bg-accent);font-style:normal}',
+    'html [data-zzz-pill]{position:relative;flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;margin-inline-end:8px;border:1px solid var(--v2-border-border-strong);border-radius:999px;background:var(--v2-background-bg-deep);color:var(--v2-icon-icon-accent);font:inherit;font-size:11px;font-weight:530;line-height:16px;white-space:nowrap;cursor:pointer;-webkit-app-region:no-drag;app-region:no-drag;transition:background 120ms ease}',
+    'html [data-zzz-pill]:hover{background:var(--v2-background-bg-layer-03)}',
+    'html [data-zzz-pill][data-fixed]{position:fixed;top:8px;right:150px;z-index:2147483000;box-shadow:0 6px 18px rgba(0,0,0,.22)}',
+    'html [data-zzz-pill] i{display:block;width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto}',
     'html [data-zzz-overlay]{position:fixed;inset:0;z-index:2147483001;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.42);backdrop-filter:blur(2px)}',
     'html [data-zzz-dialog]{width:340px;max-width:calc(100vw - 32px);display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--v2-border-border-strong);border-radius:12px;background:var(--v2-background-bg-layer-01);color:var(--v2-text-text-base);box-shadow:0 24px 64px rgba(0,0,0,.45)}',
     'html [data-zzz-dialog] h3{margin:0;font-size:14px;font-weight:600}',
@@ -372,18 +455,43 @@ GUI_JS = r"""(function () {
   // .settings-nav > .settings-nav-groups > .settings-nav-group`, one
   // `[data-slot=tabs-v2-trigger-wrapper]` per tab, and the selected tab paints
   // through `.settings-nav-groups [data-slot=tabs-v2-trigger-wrapper]:has(
-  // [data-selected])`. The list is owned by Solid, so the entry is a real
-  // wrapper + trigger node appended to the last group: the shell's own CSS then
-  // styles it, and the panel is a sibling `.settings-panel` toggled by `hidden`,
-  // which is the same contract the vendor panels use.
+  // [data-selected])`.
+  //
+  // `.settings-nav-groups` is a Solid `For` list: every selection change re-runs
+  // it, and a node appended inside it is destroyed on the next run. Destroying
+  // the node between mousedown and mouseup kills the click, which is exactly why
+  // the old in-group entries looked dead. So the entries live in our own
+  // `[data-zzz-nav]` block under `.settings-nav` (outside the reconciled list,
+  // static child of the sidebar), and the panels live in a `[data-zzz-sheet]`
+  // overlay we own, sized to `.settings-content`. Vendor panels are never hidden
+  // or mutated: closing the sheet simply reveals whatever the shell had.
 
   function settingsHost() {
-    var groups = document.querySelector(".settings-nav-groups");
     var content = document.querySelector(".settings-content");
-    if (!groups || !content) return null;
-    var groupsList = groups.querySelectorAll(".settings-nav-group");
-    if (!groupsList.length) return null;
-    return { groups: groups, content: content, last: groupsList[groupsList.length - 1] };
+    var nav = document.querySelector(".settings-nav");
+    var groups = document.querySelector(".settings-nav-groups");
+    if (!content) return null;
+    if (!nav) {
+      if (!groups) return null;
+      nav = groups.parentElement;
+    }
+    if (!nav) return null;
+    return { nav: nav, groups: groups, content: content };
+  }
+
+  function navBlock(host) {
+    var block = host.nav.querySelector("[data-zzz-nav]");
+    if (block) return block;
+    block = document.createElement("div");
+    block.setAttribute("data-zzz-nav", "");
+    var caption = document.createElement("div");
+    caption.setAttribute("data-zzz-nav-label", "");
+    caption.textContent = "ZzZ Code";
+    block.appendChild(caption);
+    // Appended after the vendor groups, never inside them: `.settings-nav` has a
+    // static child list, so nothing re-runs a `For` over our row.
+    host.nav.appendChild(block);
+    return block;
   }
 
   function iconFor(kind) {
@@ -443,6 +551,16 @@ GUI_JS = r"""(function () {
     content.appendChild(label);
 
     button.appendChild(content);
+    // Activation rides `pointerdown`, not `click`: a click needs the node to
+    // survive mousedown -> mouseup, and a shell re-render in that window is the
+    // one thing that used to eat the press. `click` stays wired for keyboard
+    // activation, and `activateTab` no-ops on the id that is already open.
+    wrap.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      activateTab(tab.id);
+    });
     button.addEventListener("click", function (event) {
       event.preventDefault();
       event.stopPropagation();
@@ -681,6 +799,270 @@ GUI_JS = r"""(function () {
 
     body.appendChild(ups);
 
+    // -------------------------------------------------------- diagnostics
+    var diag = makeSection("Diagnostics");
+    var diagStatus = document.createElement("div");
+    diagStatus.setAttribute("data-zzz-status", "");
+    var diagRow = document.createElement("div");
+    diagRow.setAttribute("data-zzz-row", "");
+    var openCrash = makeButton("Crash log");
+    var clearCrash = makeButton("Clear log");
+    var copyDiag = makeButton("Copy report");
+    diagRow.appendChild(openCrash);
+    diagRow.appendChild(clearCrash);
+    diagRow.appendChild(copyDiag);
+    diag.appendChild(diagRow);
+    diag.appendChild(diagStatus);
+
+    function readDiag() {
+      return fetch(DIAG, { cache: "no-store" })
+        .then(function (res) {
+          return res.json();
+        })
+        .then(function (data) {
+          return data || null;
+        })
+        .catch(function () {
+          return null;
+        });
+    }
+
+    // Flat `key: value` lines, because the reader is a bug report, not a parser.
+    function formatDiag(data) {
+      var lines = ["ZzZ Code diagnostics", ""];
+      if (!data) {
+        lines.push("bridge: offline");
+        return lines.join("\n");
+      }
+      var keys = [
+        ["version", "version"],
+        ["bundle", "bundle"],
+        ["python", "python"],
+        ["port", "bridge port"],
+        ["opencode", "opencode"],
+        ["desktop", "desktop"],
+        ["themes", "themes"],
+        ["workers", "workers"],
+        ["agents", "AGENTS.md"],
+        ["crash_log", "crash log"]
+      ];
+      for (var i = 0; i < keys.length; i += 1) {
+        var value = data[keys[i][0]];
+        lines.push(keys[i][1] + ": " + (value === undefined || value === null || value === "" ? "n/a" : value));
+      }
+      if (data.last_crash) lines.push("last crash: " + data.last_crash);
+      return lines.join("\n");
+    }
+
+    function showDiag() {
+      return readDiag().then(function (data) {
+        if (!data) {
+          diagStatus.textContent = "launcher bridge offline";
+          return null;
+        }
+        diagStatus.textContent =
+          "v" + (data.version || "?") + " \u00b7 python " + (data.python || "?") +
+          " \u00b7 " + (data.themes || 0) + " themes" +
+          (data.crash_log ? " \u00b7 crash log present" : " \u00b7 no crash log");
+        return data;
+      });
+    }
+
+    openCrash.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      postJSON(CRASH_OPEN, {}).then(function (result) {
+        diagStatus.textContent = result.ok
+          ? (result.data && result.data.detail) || "log opened"
+          : (result.data && result.data.detail) || "no crash log to open";
+      });
+    });
+    clearCrash.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      postJSON(CRASH_CLEAR, {}).then(function (result) {
+        diagStatus.textContent = result.ok
+          ? (result.data && result.data.detail) || "log cleared"
+          : "could not clear the log";
+      });
+    });
+    copyDiag.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      showDiag().then(function (data) {
+        copyText(formatDiag(data)).then(function (ok) {
+          diagStatus.textContent = ok ? "report copied" : "clipboard refused";
+          if (ok) toast("diagnostics copied");
+        });
+      });
+    });
+
+    body.appendChild(diag);
+
+    // ------------------------------------------------------------- runtime
+    var runtime = makeSection("Runtime");
+    var runStatus = document.createElement("div");
+    runStatus.setAttribute("data-zzz-status", "");
+    var runRow = document.createElement("div");
+    runRow.setAttribute("data-zzz-row", "");
+    var verify = makeButton("Verify stack");
+    var restartWorkers = makeButton("Restart keeper");
+    runRow.appendChild(verify);
+    runRow.appendChild(restartWorkers);
+
+    verify.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      verify.disabled = true;
+      runStatus.textContent = "reading the stack\u2026";
+      postJSON(STACK_VERIFY, {}).then(function (result) {
+        verify.disabled = false;
+        var data = result.data || {};
+        if (!result.ok) {
+          runStatus.textContent = "verify failed \u00b7 " + (data.detail || "bridge offline");
+          return;
+        }
+        runStatus.textContent =
+          (data.ok ? "stack ok" : "stack incomplete") +
+          " \u00b7 " + (data.opencode || "opencode ?") +
+          " \u00b7 " + (data.desktop || "desktop ?");
+        toast(data.ok ? "stack verified" : "stack incomplete");
+      });
+    });
+
+    restartWorkers.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      restartWorkers.disabled = true;
+      runStatus.textContent = "restarting the keepers\u2026";
+      postJSON(WORKERS_RESTART, {}).then(function (result) {
+        restartWorkers.disabled = false;
+        var data = result.data || {};
+        runStatus.textContent = result.ok
+          ? (data.detail || "workers restarted")
+          : "restart failed \u00b7 " + (data.detail || "bridge offline");
+      });
+    });
+
+    runtime.appendChild(runRow);
+    runtime.appendChild(runStatus);
+    body.appendChild(runtime);
+
+    // ----------------------------------------------------------- templates
+    var tpl = makeSection("Templates");
+    var tplStatus = document.createElement("div");
+    tplStatus.setAttribute("data-zzz-status", "");
+    var tplList = document.createElement("div");
+    tpl.appendChild(tplList);
+    tpl.appendChild(tplStatus);
+
+    function paintTemplates(items) {
+      tplList.textContent = "";
+      if (!items || !items.length) {
+        tplStatus.textContent = "no templates on disk";
+        return;
+      }
+      for (var i = 0; i < items.length; i += 1) {
+        (function (item) {
+          var row = document.createElement("div");
+          row.setAttribute("data-zzz-template", "");
+          var head = document.createElement("div");
+          head.setAttribute("data-zzz-template-head", "");
+          var name = document.createElement("span");
+          name.setAttribute("data-zzz-template-name", "");
+          name.textContent = item.name || item.id;
+          var add = makeButton("Add to AGENTS.md");
+          head.appendChild(name);
+          head.appendChild(add);
+          var note = document.createElement("div");
+          note.setAttribute("data-zzz-template-note", "");
+          note.textContent = item.note || "";
+          row.appendChild(head);
+          row.appendChild(note);
+
+          row.addEventListener("click", function (event) {
+            if (event.target === add) return;
+            event.preventDefault();
+            event.stopPropagation();
+            copyText(item.body || "").then(function (ok) {
+              tplStatus.textContent = ok
+                ? (item.name || item.id) + " copied"
+                : "clipboard refused";
+            });
+          });
+          add.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            add.disabled = true;
+            postJSON(TEMPLATE_SAVE, { id: item.id }).then(function (result) {
+              add.disabled = false;
+              tplStatus.textContent = result.ok
+                ? (result.data && result.data.detail) || "appended"
+                : "failed \u00b7 " + ((result.data && result.data.detail) || "bridge offline");
+            });
+          });
+          tplList.appendChild(row);
+        })(items[i]);
+      }
+      tplStatus.textContent = items.length + " templates \u00b7 click one to copy";
+    }
+
+    function loadTemplates() {
+      tplStatus.textContent = "reading templates\u2026";
+      fetch(TEMPLATES, { cache: "no-store" })
+        .then(function (res) {
+          return res.json();
+        })
+        .then(function (data) {
+          paintTemplates((data && data.templates) || []);
+        })
+        .catch(function () {
+          tplStatus.textContent = "launcher bridge offline";
+        });
+    }
+
+    body.appendChild(tpl);
+
+    // ------------------------------------------------------------- footer
+    var banner = document.createElement("a");
+    banner.setAttribute("data-zzz-banner", "");
+    banner.setAttribute("href", "https://discord.gg/pQBDchXTdp");
+    banner.setAttribute("target", "_blank");
+    banner.setAttribute("rel", "noreferrer noopener");
+    var mark = document.createElement("span");
+    mark.setAttribute("data-zzz-banner-mark", "");
+    mark.textContent = "z";
+    var bannerCopy = document.createElement("span");
+    var bannerName = document.createElement("b");
+    bannerName.textContent = "ZzZ Code community";
+    var bannerNote = document.createElement("span");
+    bannerNote.textContent = "Builds, patches, questions \u00b7 opens in your browser";
+    bannerCopy.appendChild(bannerName);
+    bannerCopy.appendChild(document.createElement("br"));
+    bannerCopy.appendChild(bannerNote);
+    banner.appendChild(mark);
+    banner.appendChild(bannerCopy);
+    body.appendChild(banner);
+
+    var about = makeSection("About");
+    var aboutText = document.createElement("div");
+    aboutText.setAttribute("data-zzz-hint", "");
+    aboutText.textContent =
+      "ZzZ Code " + VERSION + " \u00b7 built and kept by ZenZenitoZeno. A patched " +
+      "build of the OpenCode desktop app, published for research and study: a " +
+      "readable fork used to test local tooling, theme plumbing and launcher " +
+      "behaviour. Not affiliated with Anomaly Innovations. Source and notes at " +
+      "github.com/ZenTheScripter/zzz-code.";
+    about.appendChild(aboutText);
+    body.appendChild(about);
+
+    frame.panel.addEventListener("zzz:refresh", function () {
+      showDiag();
+      loadTemplates();
+    });
+    showDiag();
+    loadTemplates();
+
     function applyUpdateStatus(data, sync) {
       if (!data || typeof data.enabled !== "boolean") {
         statusLine.textContent = "Status: launcher bridge offline";
@@ -747,10 +1129,10 @@ GUI_JS = r"""(function () {
     return node;
   }
 
-  function paintTheme(colors, kind) {
+  function paintTheme(colors, kind, wall) {
     var node = themeStyleNode();
     themed = [];
-    if (!colors) {
+    if (!colors && !wall) {
       node.textContent = "";
       ROOT.removeAttribute("data-zzz-theme-painted");
       return;
@@ -768,9 +1150,50 @@ GUI_JS = r"""(function () {
     }
     if (kind === "light" || kind === "dark") css += "color-scheme:" + kind + " !important;";
     css += "}";
-    node.textContent = count ? css : "";
+    // A wallpaper is a gradient string, never an image file: the vendor CSP and
+    // the theme loader both stay happy, and there is nothing to fetch. It goes on
+    // a fixed layer above the shell so it reads on every panel, under the dialogs
+    // (`2147483000`) and toasts, and never eats a click.
+    var wash = "";
+    if (wall) {
+      var clean = String(wall).replace(/[;{}<>\n\r"]/g, "").trim();
+      if (clean && /^(linear|radial|conic)-gradient\(/i.test(clean)) {
+        wash =
+          'body::after{content:"";position:fixed;inset:0;pointer-events:none;' +
+          "z-index:2147482000;opacity:.22;mix-blend-mode:soft-light;" +
+          "background-image:" + clean + " !important;}";
+        count += 1;
+      }
+    }
+    node.textContent = count ? css + wash : "";
     if (count) ROOT.setAttribute("data-zzz-theme-painted", String(count));
     else ROOT.removeAttribute("data-zzz-theme-painted");
+  }
+
+  // Reload restore. The bridge keeps the applied id, so the first paint after a
+  // window reload re-applies it before the settings page is ever opened; the
+  // saved localStorage id is only a hint for the panel's own ordering.
+  function restoreTheme() {
+    try {
+      fetch(THEMES, { cache: "no-store" })
+        .then(function (res) {
+          return res.json();
+        })
+        .then(function (data) {
+          if (!data || !data.active || !data.themes) return;
+          for (var i = 0; i < data.themes.length; i += 1) {
+            if (data.themes[i].id !== data.active) continue;
+            var theme = data.themes[i];
+            paintTheme(theme.colors, theme.kind, theme.wall);
+            return;
+          }
+        })
+        .catch(function () {
+          return;
+        });
+    } catch (err) {
+      return;
+    }
   }
 
   function swatch(theme, onPick) {
@@ -790,6 +1213,10 @@ GUI_JS = r"""(function () {
     var preview = document.createElement("span");
     preview.setAttribute("data-zzz-swatch-preview", "");
     preview.style.background = bg;
+    if (theme.wall) {
+      preview.style.backgroundImage = String(theme.wall);
+      preview.setAttribute("data-wall", "");
+    }
     var bars = [
       { width: "46%", color: text },
       { width: "70%", color: l3 },
@@ -829,16 +1256,30 @@ GUI_JS = r"""(function () {
     tools.setAttribute("data-zzz-copy", "");
     tools.style.flexDirection = "row";
     tools.style.gap = "8px";
+    tools.style.flexWrap = "wrap";
 
     var reload = makeButton("Reload");
-    var folder = makeButton("Open theme folder");
-    var fresh = makeButton("New theme file");
+    var folder = makeButton("Theme folder");
+    var fresh = makeButton("New theme");
+    var surprise = makeButton("Surprise me");
+    var exportPalette = makeButton("Copy palette");
     var clear = makeButton("Default");
     tools.appendChild(reload);
     tools.appendChild(folder);
     tools.appendChild(fresh);
+    tools.appendChild(surprise);
+    tools.appendChild(exportPalette);
     tools.appendChild(clear);
     bar.appendChild(tools);
+
+    // Search is a plain substring match over name and author, and it re-renders
+    // from the cached list, so typing never re-hits the bridge.
+    var search = document.createElement("input");
+    search.type = "search";
+    search.setAttribute("data-zzz-search", "");
+    search.setAttribute("placeholder", "Filter themes \u00b7 name or author");
+    search.setAttribute("spellcheck", "false");
+    bar.appendChild(search);
 
     var grid = document.createElement("div");
     grid.setAttribute("data-zzz-grid", "");
@@ -850,12 +1291,65 @@ GUI_JS = r"""(function () {
     body.appendChild(grid);
     body.appendChild(status);
 
-    function mark(theme) {
+    var all = [];
+    var activeTheme = null;
+    var query = "";
+
+    var all = [];
+    var activeTheme = null;
+    var query = "";
+    var dir = "";
+
+    function mark(id) {
       var cards = grid.querySelectorAll("[data-zzz-swatch]");
       for (var i = 0; i < cards.length; i += 1) {
-        if (cards[i] === theme) cards[i].setAttribute("data-active", "");
+        var theme = cards[i].__zzzTheme;
+        if (theme && theme.id === id) cards[i].setAttribute("data-active", "");
         else cards[i].removeAttribute("data-active");
       }
+    }
+
+    function applyTheme(picked) {
+      status.textContent = "Applying " + picked.name + "\u2026";
+      postJSON(THEMES_APPLY, { id: picked.id }).then(function (result) {
+        if (!result.ok || !result.data || !result.data.colors) {
+          var why = (result.data && result.data.detail) || "bridge refused the id";
+          status.textContent = "apply failed \u00b7 " + why;
+          return;
+        }
+        paintTheme(result.data.colors, picked.kind, result.data.wall || picked.wall);
+        activeTheme = picked;
+        mark(picked.id);
+        status.textContent = picked.name + " applied";
+        toast(picked.name + " applied");
+        try {
+          window.localStorage.setItem(THEME_KEY, picked.id);
+        } catch (err) {
+          return;
+        }
+      });
+    }
+
+    function render() {
+      grid.textContent = "";
+      var needle = String(query || "").trim().toLowerCase();
+      var shown = 0;
+      for (var i = 0; i < all.length; i += 1) {
+        var theme = all[i];
+        var hay = String(theme.name || "") + " " + String(theme.author || "");
+        if (needle && hay.toLowerCase().indexOf(needle) < 0) continue;
+        theme.active = !!(activeTheme && theme.id === activeTheme.id);
+        grid.appendChild(swatch(theme, applyTheme));
+        shown += 1;
+      }
+      if (!shown) {
+        var empty = document.createElement("div");
+        empty.setAttribute("data-zzz-status", "");
+        empty.textContent = "nothing matches \u201c" + String(query).trim() + "\u201d";
+        grid.appendChild(empty);
+      }
+      status.textContent =
+        shown + " of " + all.length + " themes" + (dir ? " \u00b7 " + dir : "");
     }
 
     function load() {
@@ -865,42 +1359,54 @@ GUI_JS = r"""(function () {
           return res.json();
         })
         .then(function (data) {
-          grid.textContent = "";
           if (!data || !data.themes) {
             status.textContent = "launcher bridge offline";
             return;
           }
-          var active = null;
-          for (var i = 0; i < data.themes.length; i += 1) {
-            var theme = data.themes[i];
-            theme.active = theme.id === data.active;
-            if (theme.active) active = theme;
-            grid.appendChild(
-              swatch(theme, function (picked) {
-                postJSON(THEMES_APPLY, { id: picked.id }).then(function (result) {
-                  if (!result.ok || !result.data || !result.data.colors) {
-                    status.textContent = "apply failed";
-                    return;
-                  }
-                  paintTheme(result.data.colors, picked.kind);
-                  var cards = grid.querySelectorAll("[data-zzz-swatch]");
-                  for (var k = 0; k < cards.length; k += 1) {
-                    if (cards[k].__zzzTheme === picked) cards[k].setAttribute("data-active", "");
-                    else cards[k].removeAttribute("data-active");
-                  }
-                  status.textContent = picked.name + " applied";
-                });
-              })
-            );
+          all = data.themes;
+          dir = data.dir || "";
+          activeTheme = null;
+          for (var i = 0; i < all.length; i += 1) {
+            if (all[i].id === data.active) activeTheme = all[i];
           }
-          paintTheme(active ? active.colors : null, active ? active.kind : "");
-          status.textContent =
-            data.themes.length + " themes \u00b7 " + data.dir;
+          render();
+          if (activeTheme) paintTheme(activeTheme.colors, activeTheme.kind, activeTheme.wall);
         })
         .catch(function () {
           status.textContent = "launcher bridge offline";
         });
     }
+
+    search.addEventListener("input", function () {
+      query = search.value || "";
+      render();
+    });
+
+    surprise.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!all.length) return;
+      var pool = all;
+      var pick = pool[Math.floor(Math.random() * pool.length)];
+      applyTheme(pick);
+    });
+
+    exportPalette.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!activeTheme) {
+        status.textContent = "nothing applied yet";
+        return;
+      }
+      var payload = JSON.stringify(
+        { id: activeTheme.id, name: activeTheme.name, kind: activeTheme.kind, wall: activeTheme.wall || "", colors: activeTheme.colors || {} },
+        null,
+        2
+      );
+      copyText(payload).then(function (ok) {
+        status.textContent = ok ? "palette copied \u00b7 paste into a theme file" : "clipboard refused";
+      });
+    });
 
     reload.addEventListener("click", function (event) {
       event.preventDefault();
@@ -957,95 +1463,16 @@ GUI_JS = r"""(function () {
     return document.querySelectorAll("[data-zzz-tab]");
   }
 
-  function tabFor(id) {
+  function markNav(id) {
     var tabs = ourTabs();
     for (var i = 0; i < tabs.length; i += 1) {
-      if (tabs[i].getAttribute("data-zzz-tab") === id) {
-        return tabs[i].querySelector('[data-slot="tabs-v2-trigger"]');
-      }
-    }
-    return null;
-  }
-
-  function clearSelection(host) {
-    var wraps = host.groups.querySelectorAll("[data-slot=tabs-v2-trigger-wrapper]");
-    for (var i = 0; i < wraps.length; i += 1) {
-      var trigger = wraps[i].querySelector('[data-slot="tabs-v2-trigger"]');
+      var trigger = tabs[i].querySelector('[data-slot="tabs-v2-trigger"]');
       if (!trigger) continue;
-      trigger.removeAttribute("data-selected");
-      trigger.setAttribute("aria-selected", "false");
-      trigger.setAttribute("tabindex", "-1");
-    }
-  }
-
-  function hidePanels(host, keep) {
-    var panels = host.content.querySelectorAll(".settings-panel");
-    for (var i = 0; i < panels.length; i += 1) {
-      var node = panels[i];
-      if (node === keep) continue;
-      if (!node.hasAttribute("hidden")) node.setAttribute("data-zzz-was-visible", "1");
-      node.setAttribute("hidden", "");
-    }
-    if (keep) keep.removeAttribute("hidden");
-  }
-
-  // Each tab owns one panel. Panels are built once and reused; a re-render that
-  // drops them is caught by mountTab, which rebuilds whichever id is selected.
-  function activateTab(id) {
-    var host = settingsHost();
-    if (!host) return;
-    var panel = host.content.querySelector('[data-zzz-owner="' + id + '"]');
-    if (!panel) {
-      var spec = null;
-      for (var i = 0; i < TABS.length; i += 1) {
-        if (TABS[i].id === id) spec = TABS[i];
-      }
-      if (!spec) return;
-      panel = spec.build();
-      panel.setAttribute("data-zzz-panel", "");
-      panel.setAttribute("data-zzz-owner", id);
-      host.content.appendChild(panel);
-    }
-    hidePanels(host, panel);
-    clearSelection(host);
-    var trigger = tabFor(id);
-    if (trigger) {
-      trigger.setAttribute("data-selected", "");
-      trigger.setAttribute("aria-selected", "true");
-      trigger.setAttribute("tabindex", "0");
-    }
-    try {
-      panel.dispatchEvent(new CustomEvent("zzz:refresh"));
-    } catch (err) {
-      return;
-    }
-  }
-
-  function selectedTabId() {
-    var tabs = ourTabs();
-    for (var i = 0; i < tabs.length; i += 1) {
-      var trigger = tabs[i].querySelector("[data-slot=tabs-v2-trigger]");
-      if (trigger && trigger.hasAttribute("data-selected")) {
-        return tabs[i].getAttribute("data-zzz-tab");
-      }
-    }
-    return "";
-  }
-
-  function deactivateTab() {
-    var host = settingsHost();
-    if (!host) return;
-    var panels = host.content.querySelectorAll("[data-zzz-panel]");
-    for (var i = 0; i < panels.length; i += 1) panels[i].setAttribute("hidden", "");
-    var hiddenByUs = host.content.querySelectorAll("[data-zzz-was-visible]");
-    for (var j = 0; j < hiddenByUs.length; j += 1) {
-      hiddenByUs[j].removeAttribute("data-zzz-was-visible");
-      hiddenByUs[j].removeAttribute("hidden");
-    }
-    var tabs = ourTabs();
-    for (var k = 0; k < tabs.length; k += 1) {
-      var trigger = tabs[k].querySelector("[data-slot=tabs-v2-trigger]");
-      if (trigger) {
+      if (tabs[i].getAttribute("data-zzz-tab") === id) {
+        trigger.setAttribute("data-selected", "");
+        trigger.setAttribute("aria-selected", "true");
+        trigger.setAttribute("tabindex", "0");
+      } else {
         trigger.removeAttribute("data-selected");
         trigger.setAttribute("aria-selected", "false");
         trigger.setAttribute("tabindex", "-1");
@@ -1053,15 +1480,134 @@ GUI_JS = r"""(function () {
     }
   }
 
+  // The vendor row paints through `:has([data-selected])`. Our sheet paints its
+  // own row, and leaving two lit rows reads as "two tabs at once", so the live
+  // vendor selection is parked in `data-zzz-vendor-selected` and put back when
+  // the sheet closes. Nothing else about the vendor DOM is touched.
+
+  function clearVendorSelection(host) {
+    if (!host || !host.groups) return;
+    var wraps = host.groups.querySelectorAll("[data-slot=tabs-v2-trigger-wrapper]");
+    for (var i = 0; i < wraps.length; i += 1) {
+      var trigger = wraps[i].querySelector('[data-slot="tabs-v2-trigger"]');
+      if (!trigger || !trigger.hasAttribute("data-selected")) continue;
+      wraps[i].setAttribute("data-zzz-vendor-selected", "1");
+      trigger.removeAttribute("data-selected");
+      trigger.setAttribute("aria-selected", "false");
+    }
+  }
+
+  function restoreVendorSelection(host) {
+    if (!host || !host.groups) return;
+    var marked = host.groups.querySelectorAll("[data-zzz-vendor-selected]");
+    if (!marked.length) return;
+    // If the shell has already painted a choice of its own, the parked marker is
+    // stale: drop it and leave the fresh paint alone.
+    var painted = host.groups.querySelector('[data-slot="tabs-v2-trigger"][data-selected]');
+    for (var i = 0; i < marked.length; i += 1) {
+      marked[i].removeAttribute("data-zzz-vendor-selected");
+      if (painted) continue;
+      var trigger = marked[i].querySelector('[data-slot="tabs-v2-trigger"]');
+      if (!trigger) continue;
+      trigger.setAttribute("data-selected", "");
+      trigger.setAttribute("aria-selected", "true");
+      trigger.setAttribute("tabindex", "0");
+    }
+  }
+
+  var sheetState = { id: "" };
+
+  function sheetNode() {
+    // `div[data-zzz-sheet]`, never the bare attribute: `<html>` carries the
+    // `data-zzz-sheet-open` flag while a sheet is up, and a bare selector would
+    // grab the document element and style the page instead of the overlay.
+    var sheet = document.querySelector("div[data-zzz-sheet]");
+    if (sheet) return sheet;
+    sheet = document.createElement("div");
+    sheet.setAttribute("data-zzz-sheet", "");
+    (document.body || ROOT).appendChild(sheet);
+    return sheet;
+  }
+
+  // The sheet is a sibling overlay pinned to the measured content box. Measuring
+  // beats `position:absolute` here because the shell centres a max-width column
+  // and the sidebar can collapse; the rect is the only honest answer.
+  function placeSheet() {
+    var host = settingsHost();
+    if (!host) return null;
+    var rect = host.content.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    var sheet = sheetNode();
+    sheet.style.left = Math.round(rect.left) + "px";
+    sheet.style.top = Math.round(rect.top) + "px";
+    sheet.style.width = Math.round(rect.width) + "px";
+    sheet.style.height = Math.round(rect.height) + "px";
+    return sheet;
+  }
+
+  function sheetPanel(sheet, id) {
+    var spec = null;
+    for (var i = 0; i < TABS.length; i += 1) {
+      if (TABS[i].id === id) spec = TABS[i];
+    }
+    if (!spec) return null;
+    var panel = sheet.querySelector('[data-zzz-owner="' + id + '"]');
+    if (!panel) {
+      panel = spec.build();
+      panel.setAttribute("data-zzz-owner", id);
+      sheet.appendChild(panel);
+    }
+    var panels = sheet.querySelectorAll("[data-zzz-owner]");
+    for (var j = 0; j < panels.length; j += 1) {
+      if (panels[j] === panel) panels[j].removeAttribute("hidden");
+      else panels[j].setAttribute("hidden", "");
+    }
+    return panel;
+  }
+
+  function activateTab(id) {
+    if (sheetState.id === id) return;
+    var host = settingsHost();
+    if (!host) return;
+    var sheet = placeSheet();
+    if (!sheet) return;
+    var panel = sheetPanel(sheet, id);
+    if (!panel) return;
+    sheetState.id = id;
+    sheet.setAttribute("data-open", id);
+    document.documentElement.setAttribute("data-zzz-sheet-open", id);
+    clearVendorSelection(host);
+    markNav(id);
+    try {
+      panel.dispatchEvent(new CustomEvent("zzz:refresh"));
+    } catch (err) {
+      return;
+    }
+  }
+
+  function closeSheet() {
+    if (!sheetState.id) return;
+    sheetState.id = "";
+    document.documentElement.removeAttribute("data-zzz-sheet-open");
+    var sheet = document.querySelector("div[data-zzz-sheet]");
+    if (sheet) sheet.removeAttribute("data-open");
+    markNav("");
+    restoreVendorSelection(settingsHost());
+  }
+
   function bindNav(host) {
-    if (host.groups.getAttribute("data-zzz-bound") === "1") return;
-    host.groups.setAttribute("data-zzz-bound", "1");
-    host.groups.addEventListener(
-      "click",
+    if (host.nav.getAttribute("data-zzz-bound") === "1") return;
+    host.nav.setAttribute("data-zzz-bound", "1");
+    // Capture phase: the shell's own row is about to paint a vendor panel under
+    // the sheet, so the sheet steps aside first and the parked selection comes
+    // back if nothing new was chosen.
+    host.nav.addEventListener(
+      "pointerdown",
       function (event) {
         var target = event.target;
-        if (target instanceof Element && target.closest("[data-zzz-tab]")) return;
-        deactivateTab();
+        if (!(target instanceof Element)) return;
+        if (target.closest("[data-zzz-nav]")) return;
+        closeSheet();
       },
       true
     );
@@ -1069,15 +1615,29 @@ GUI_JS = r"""(function () {
 
   function mountTab() {
     var host = settingsHost();
-    if (!host) return;
+    if (!host) {
+      closeSheet();
+      return;
+    }
     bindNav(host);
+    var block = navBlock(host);
     for (var i = 0; i < TABS.length; i += 1) {
-      if (!host.last.querySelector('[data-zzz-tab="' + TABS[i].id + '"]')) {
-        host.last.appendChild(buildTab(TABS[i]));
+      if (!block.querySelector('[data-zzz-tab="' + TABS[i].id + '"]')) {
+        block.appendChild(buildTab(TABS[i]));
       }
     }
-    var active = selectedTabId();
-    if (active) activateTab(active);
+    if (!sheetState.id) return;
+    // A re-render can drop the sheet panel while the id stays selected; rebuild
+    // in place and re-measure so the overlay keeps covering the content column.
+    var sheet = placeSheet();
+    if (!sheet || !sheet.querySelector('[data-zzz-owner="' + sheetState.id + '"]')) {
+      var keep = sheetState.id;
+      sheetState.id = "";
+      activateTab(keep);
+      return;
+    }
+    clearVendorSelection(host);
+    markNav(sheetState.id);
   }
 
   // ------------------------------------------------------------ update pill
@@ -1087,6 +1647,63 @@ GUI_JS = r"""(function () {
   // With two updates pending it fuses into one pill and opens a chooser.
 
   var VERSION = "1.1.0";
+
+  // Stock OpenCode parks its update button in the titlebar's right slot:
+  // `header[data-slot=titlebar-v2]` holds a flex row, and the right-most child is
+  // `div.relative.z-20...justify-end` containing `[data-slot=titlebar-update]`.
+  // Our pill joins that same row, so it lands where the stock control lives and
+  // never drifts over the window buttons.
+  function titlebarHost() {
+    var update = document.querySelector('[data-slot="titlebar-update"]');
+    if (update && update.parentElement) return update.parentElement;
+    var header = document.querySelector('header[data-slot="titlebar-v2"]');
+    if (!header) return null;
+    var kids = header.querySelectorAll(":scope > div");
+    for (var i = 0; i < kids.length; i += 1) {
+      if (kids[i].querySelector(":scope > .justify-end")) return kids[i].querySelector(":scope > .justify-end");
+      if (kids[i].className && String(kids[i].className).indexOf("justify-end") >= 0) return kids[i];
+    }
+    return header;
+  }
+
+  function keepPillHome(node) {
+    var host = titlebarHost();
+    if (!host) {
+      // Titlebar not mounted yet (or a themed shell without one): float it at the
+      // stock offset rather than dropping it, and retry on the next pass.
+      if (!node.hasAttribute("data-fixed")) {
+        node.setAttribute("data-fixed", "");
+        (document.body || ROOT).appendChild(node);
+      }
+      return;
+    }
+    if (node.hasAttribute("data-fixed")) node.removeAttribute("data-fixed");
+
+    // The row is `[ ... ][titlebar-update][window controls]` and it is laid out
+    // left to right, so "in the row" is not enough: appending puts the pill to
+    // the right of the minimise/close buttons. The pill is spliced in directly
+    // after the stock update slot, or, when the vendor has no update control, in
+    // front of the window buttons. Both put it where the stock control lives.
+    var slot = host.querySelector('[data-slot="titlebar-update"]');
+    var anchor = null;
+    if (slot && slot.parentElement === host) {
+      anchor = slot.nextElementSibling;
+    } else {
+      var kids = host.children;
+      for (var i = 0; i < kids.length; i += 1) {
+        var name = String(kids[i].className || "");
+        if (name.indexOf("winctl") >= 0 || name.indexOf("window-control") >= 0) {
+          anchor = kids[i];
+          break;
+        }
+      }
+    }
+    if (anchor) {
+      if (node.nextElementSibling !== anchor) host.insertBefore(node, anchor);
+      return;
+    }
+    if (node.parentElement !== host) host.appendChild(node);
+  }
 
   function renderPill(status) {
     var zzzUp = !!(status && status.zzz && status.zzz.available);
@@ -1105,7 +1722,9 @@ GUI_JS = r"""(function () {
         event.stopPropagation();
         openUpdateDialog();
       });
-      (document.body || ROOT).appendChild(node);
+      keepPillHome(node);
+    } else {
+      keepPillHome(node);
     }
     node.textContent = "";
     var dot = document.createElement("i");
@@ -1269,13 +1888,18 @@ GUI_JS = r"""(function () {
   }
 
   var queued = false;
+  function mountSoon() {
+    queued = false;
+    mount();
+  }
   function schedule() {
     if (queued) return;
     queued = true;
-    window.requestAnimationFrame(function () {
-      queued = false;
-      mount();
-    });
+    // rAF is the cheap path, but a backgrounded window does not paint frames and
+    // the shell's DOM keeps changing there (settings panels mount lazily). The
+    // timer is the floor: whichever fires first clears `queued`.
+    window.requestAnimationFrame(mountSoon);
+    window.setTimeout(mountSoon, 120);
   }
 
   // The chip and the settings shell both arrive after first paint (lazy panels,
@@ -1296,8 +1920,38 @@ GUI_JS = r"""(function () {
     mount();
     askLauncher();
     reattempt();
+    restoreTheme();
     pollUpdates();
     window.setInterval(pollUpdates, 90000);
+    window.addEventListener("resize", function () {
+      if (sheetState.id) placeSheet();
+    });
+    window.addEventListener(
+      "keydown",
+      function (event) {
+        if (event.key === "Escape") {
+          if (document.querySelector("[data-zzz-overlay]")) {
+            closeUpdateDialog();
+            return;
+          }
+          if (sheetState.id) {
+            event.preventDefault();
+            closeSheet();
+          }
+          return;
+        }
+        // Ctrl/Cmd+Shift+Z opens the ZzZ Code sheet from anywhere in the window,
+        // and again closes it, which is quicker than walking the sidebar.
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {
+          var key = String(event.key || "").toLowerCase();
+          if (key !== "z") return;
+          event.preventDefault();
+          if (sheetState.id) closeSheet();
+          else activateTab("zzz");
+        }
+      },
+      true
+    );
     new MutationObserver(schedule).observe(document.body, {
       childList: true,
       subtree: true
@@ -1348,18 +2002,61 @@ VENDOR_NAMES = (b"Opencode Unlimited", b"OpenCode Unlimited", b"OpenCode")
 # Whole-value rewrites that carry the disclaimer. Each pair is (shipped, ours);
 # a missing first literal just means the vendor moved on, so the pair is skipped
 # rather than raising.
+#
+# These are `str`, not `bytes`: Python bytes literals cannot hold non-ASCII, and
+# every colophon literal carries a typographic character (’ · ©). Written as
+# bytes they would be a literal backslash sequence that never matches the asar,
+# which is exactly the silent no-op these pairs used to be. `rebrand_values`
+# encodes both sides on the way in.
 COPY_PAIRS = (
     (
-        b"`OpenCode, the open source coding agent`",
-        b"`ZzZ Code - a modified OpenCode build. Research use only.`",
+        "`OpenCode, the open source coding agent`",
+        "`ZzZ Code - a modified OpenCode build. Research use only.`",
     ),
     (
-        b"`OpenCode is a registered trademark of Anomaly Innovations, Inc.`",
-        b"`ZenZenitoZeno - research use only.`",
+        "`OpenCode is a registered trademark of Anomaly Innovations, Inc.`",
+        "`ZenZenitoZeno - research use only.`",
     ),
     (
-        b"`OpenCode includes the following open source software.`",
-        b"`ZzZ Code includes the following open source software.`",
+        "`OpenCode includes the following open source software.`",
+        "`ZzZ Code includes the following open source software.`",
+    ),
+    # The colophon. The first five are English-locale only, so the swap lands on
+    # the string a reader actually sees and the other 60-odd locales keep their
+    # own translation untouched. The website and the copyright line are shared by
+    # every locale, so those two do move everywhere - which is intended: the
+    # bundle is ours, and a vendor address in a fork is a dead link.
+    (
+        "`AI can\u2019t build great software, without you`",
+        "`ZzZ Code \u00b7 a research build maintained by ZenZenitoZeno`",
+    ),
+    (
+        "`Written by {{names}}`",
+        "`Built and kept by ZenZenitoZeno`",
+    ),
+    (
+        "`Illustrated by {{names}}`",
+        "`Distributed for research and study only`",
+    ),
+    (
+        "`First published in Missouri, USA`",
+        "`Forked from the OpenCode open source project`",
+    ),
+    (
+        "`First illustrated in London, England`",
+        "`Independent \u00b7 not affiliated with Anomaly Innovations`",
+    ),
+    (
+        "`Typeset in Inter and IBM Plex Mono`",
+        "`Built for learning, auditing and experimentation`",
+    ),
+    (
+        "`www.opencode.ai`",
+        "`github.com/ZenTheScripter/zzz-code`",
+    ),
+    (
+        "`\u00a9 Anomaly Innovations, Inc.`",
+        "`\u00a9 ZenZenitoZeno \u00b7 research use only`",
     ),
 )
 
@@ -1412,8 +2109,9 @@ def rebrand_copy(body: bytes) -> bytes:
 
 def rebrand_values(body: bytes) -> bytes:
     for old, new in COPY_PAIRS:
-        if body.count(old) == 1:
-            body = body.replace(old, new, 1)
+        needle = old.encode("utf-8")
+        if body.count(needle) == 1:
+            body = body.replace(needle, new.encode("utf-8"), 1)
     return body
 
 
