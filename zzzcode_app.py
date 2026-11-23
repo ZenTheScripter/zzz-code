@@ -3738,11 +3738,17 @@ def launch_desktop() -> None:
     print(MARGIN + c_dim("desktop is up \u00b7 projects load from opencode.db"))
 
 
-def launch_cli() -> None:
-    heading("Launch \u00b7 CLI", "zzzcode.exe in a fresh terminal")
+def _cli_prepare():
+    """Bring up the tunnel and the lane, and build the child environment.
+
+    Split out of `launch_cli` so `--cli` can run the runtime in the console it
+    was started from: a shim on PATH has no lane of its own, and a CLI with no
+    route to the network is a CLI that looks like it never started.
+    Returns (server, port, env) or None when a step refused.
+    """
     if not PATCHED.is_file():
         step("zzzcode.exe is not staged", ok=False, detail="run Repair patch from the main menu")
-        return
+        return None
 
     v6 = get_warp_local_v6()
     if not v6:
@@ -3753,7 +3759,7 @@ def launch_cli() -> None:
         set_session_active(False)
         step("WARP IPv6 tunnel is down", ok=False,
              detail="CLI needs a Cloudflare /64 - run Doctor, then retry")
-        return
+        return None
     step("WARP tunnel up", detail=normalize_v6_64(v6) or v6)
 
     working("Opening a fresh zen-lane proxy", 0.5)
@@ -3761,7 +3767,7 @@ def launch_cli() -> None:
         srv, port, edge = start_proxy_server(0)
     except Exception as exc:
         step("proxy bind failed: %s" % exc, ok=False)
-        return
+        return None
     step("lane proxy on 127.0.0.1:%d" % port, detail="edge %s" % (edge or "auto"))
 
     env = os.environ.copy()
@@ -3779,7 +3785,7 @@ def launch_cli() -> None:
         step("could not create the CLI data root: %s" % exc, ok=False)
         srv.shutdown()
         srv.server_close()
-        return
+        return None
     # A 2.x runtime migrates the desktop's database forward and reads it as-is,
     # so it shares the store. A 1.x build cannot and gets a private one.
     if _runtime_major() < 2:
@@ -3791,6 +3797,53 @@ def launch_cli() -> None:
 
     ok, msg = inject_apply()
     step("instruction feed live", ok=ok, detail=msg)
+    return srv, port, env
+
+
+def _cli_teardown(srv, port: int) -> None:
+    srv.shutdown()
+    srv.server_close()
+    park_ok, park_msg = warp_park()
+    if not park_ok:
+        print(MARGIN + c_dim("tunnel still up \u00b7 %s" % park_msg))
+    ok, msg = inject_revert()
+    if ok:
+        print(MARGIN + c_dim("instruction feed closed \u00b7 %s" % msg))
+    print(MARGIN + c_dim("lane closed \u00b7 proxy on 127.0.0.1:%d released" % port))
+
+
+def run_cli(argv: list[str] | None = None) -> int:
+    """Run the staged runtime in this console, on a fresh lane.
+
+    This is what the PATH shims call. It is the same stack `launch_cli` opens,
+    minus the extra window: the runtime inherits this terminal, so a shim typed
+    by hand behaves exactly like the menu entry.
+    """
+    heading("Launch \u00b7 CLI", "zzzcode.exe in this terminal")
+    prepared = _cli_prepare()
+    if prepared is None:
+        return 1
+    srv, port, env = prepared
+    try:
+        proc = subprocess.run([str(PATCHED)] + list(argv or []), env=env, cwd=str(APP_ROOT))
+        code = proc.returncode
+    except KeyboardInterrupt:
+        code = 0
+    except OSError as exc:
+        print(MARGIN + c_ash("could not start the runtime: %s" % exc))
+        code = 1
+    finally:
+        _cli_teardown(srv, port)
+    return code
+
+
+def launch_cli() -> None:
+    heading("Launch \u00b7 CLI", "zzzcode.exe in a fresh terminal")
+    prepared = _cli_prepare()
+    if prepared is None:
+        return
+    srv, port, env = prepared
+    proxy_url = "http://127.0.0.1:%d" % port
 
     # A generated .cmd avoids nested-quote mangling: `start` re-parses its
     # command line, and a quoted path with arguments cannot survive that intact.
@@ -3832,15 +3885,7 @@ def launch_cli() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        srv.shutdown()
-        srv.server_close()
-        park_ok, park_msg = warp_park()
-        if not park_ok:
-            print(MARGIN + c_dim("tunnel still up \u00b7 %s" % park_msg))
-        ok, msg = inject_revert()
-        if ok:
-            print(MARGIN + c_dim("instruction feed closed \u00b7 %s" % msg))
-    print(MARGIN + c_dim("lane closed \u00b7 proxy on 127.0.0.1:%d released" % port))
+        _cli_teardown(srv, port)
 
 
 # --------------------------------------------------------------- runtime staging
@@ -4661,20 +4706,19 @@ def install_launchers() -> tuple[bool, str]:
     for name in ("zzzcode.cmd", "zzz.cmd", "zzz-code.cmd"):
         changed |= _write_if_changed(SHIM_DIR / name, _shim_text(target, args))
     if PATCHED.is_file():
-        try:
-            CLI_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
-        cli_extra = ['set "XDG_DATA_HOME=%s"' % CLI_DATA_DIR] if _runtime_major() < 2 else []
+        # The CLI shims go through the launcher (`--cli`) instead of calling the
+        # runtime directly: the runtime needs the zen lane in its environment,
+        # and the lane is opened per session. Called bare it starts, looks dead,
+        # and reaches nothing. `--cli` brings the tunnel up first, then hands the
+        # console over.
+        cli_args = (args + " --cli").strip()
         changed |= _write_if_changed(
-            SHIM_DIR / "zzzcode-cli.cmd",
-            _shim_text('"%s"' % PATCHED, extra=cli_extra),
+            SHIM_DIR / "zzzcode-cli.cmd", _shim_text(target, cli_args)
         )
         # `opencode` is what the README promises and what a hand reaches for.
         # SHIM_DIR sits ahead of the vendor bins on PATH, so this wins.
         changed |= _write_if_changed(
-            SHIM_DIR / "opencode.cmd",
-            _shim_text('"%s"' % PATCHED, extra=cli_extra),
+            SHIM_DIR / "opencode.cmd", _shim_text(target, cli_args)
         )
     changed |= _path_ensure(SHIM_DIR)
 
@@ -4932,6 +4976,15 @@ def main_menu() -> None:
 # -------------------------------------------------------------- dispatch
 
 def _self_dispatch(argv: list[str]) -> int | None:
+    # `--cli` owns everything after it: `zzzcode --cli --version` must reach the
+    # runtime, not print the launcher's own version.
+    if "--cli" in argv:
+        # The PATH shims route here: bring the lane up, then hand this console to
+        # the runtime so `opencode` typed anywhere behaves like the menu entry.
+        index = argv.index("--cli")
+        ensure_dirs()
+        return run_cli(argv[index + 1:])
+
     if "--version" in argv or "-V" in argv:
         print(APP_VERSION)
         return 0
@@ -4942,6 +4995,7 @@ def _self_dispatch(argv: list[str]) -> int | None:
         for flag, about in (
             ("(no flag)", "boot the intro and the menu"),
             ("--no-menu", "boot and stage the runtime without the menu"),
+            ("--cli [args]", "run the staged runtime here, on a fresh zen lane"),
             ("--version, -V", "print the launcher version"),
             ("--help, -h", "this list"),
             ("--doctor", "run the diagnostics and exit"),

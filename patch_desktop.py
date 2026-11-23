@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -46,14 +47,25 @@ ASAR = (
 )
 BACKUP = ASAR.with_suffix(".asar.zzz.bak")
 
-MARKER_HERO = b"P3t=z(`"
-MARKER_SPLASH = b"HBn=z(`"
-MARKER_PINS = b"li=["
-TERM_PINS = b"],J=78"
+# Locators are structural, never minified local names. The Vite pass renames
+# every binding on each build (`P3t=z(` became `S6t=z(`, `ta=` became `la=`), so
+# an anchor written against a name dies on every vendor update. What survives is
+# what belongs to the art and the DOM: the viewBox, the slot attributes, the
+# glyph-record shape, the literal geometry. Everything below is anchored there.
 VIEWBOX_HERO = b'viewBox="0 0 234 42"'
 VIEWBOX_SPLASH = b'viewBox="0 0 720 129"'
+TEMPLATE_OPEN = b"(`"
 PATH_OPEN = b"<path"
 PATH_CLOSE = b"</path>"
+
+# The route chunk that owns the draw-on wordmark is the one carrying this slot.
+WORDMARK_SLOT = b"data-slot=wordmark-flat"
+FLAT_ARRAY_OPEN = b"[{cx:"
+FLAT_ARRAY_TERM = b"}],"
+PIN_COLUMNS = 78
+PIN_ROWS = 14
+PIN_CELL = re.compile(rb"`[0-3.]{%d}`" % PIN_COLUMNS)
+
 
 
 # ---------------------------------------------------------------- pixel font
@@ -422,15 +434,23 @@ def renderer_bundle(index):
     raise RuntimeError("renderer bundle not found")
 
 
-def flat_route(index):
-    """The lazily loaded route chunk that carries the draw-on wordmark."""
+def flat_route(data: bytes, index, base: int):
+    """The lazily loaded route chunk that carries the draw-on wordmark.
+
+    A build ships several `route-*.js` chunks and their order in the header is
+    not stable, so the one we want is identified by content: only the wordmark
+    chunk renders the `wordmark-flat` slot.
+    """
     assets = index["files"]["out"]["files"]["renderer"]["files"]["assets"]["files"]
     for name, entry in assets.items():
         size = int(entry.get("size", 0))
         if not name.startswith("route-") or not name.endswith(".js"):
             continue
-        return name, int(entry["offset"]), size
-    raise RuntimeError("route chunk not found")
+        offset = int(entry["offset"])
+        body = data[base + offset: base + offset + size]
+        if WORDMARK_SLOT in body:
+            return name, offset, size
+    raise RuntimeError("wordmark route chunk not found")
 
 
 def locate_flat(data, offset, size, base):
@@ -438,14 +458,21 @@ def locate_flat(data, offset, size, base):
     body_start = base + offset
     body = data[body_start: body_start + size]
 
-    at = body.find(FLAT_MARKER)
+    at = body.find(FLAT_ARRAY_OPEN)
     if at < 0:
         raise RuntimeError("flat wordmark array not found")
-    arr_start = at + len(b"ta=")
-    tail = body.find(FLAT_TERMINATOR, arr_start)
-    if tail < 0:
+    if body.count(FLAT_ARRAY_OPEN) != 1:
+        raise RuntimeError("flat wordmark array is not unique")
+    arr_start = at
+    # Glyph records never carry a bracket, so the first `]` after the open is the
+    # array close. A patched bundle keeps its padding between the last record and
+    # that bracket, which is why the terminator cannot be searched as `}],`.
+    close = body.find(b"]", arr_start)
+    if close < 0:
         raise RuntimeError("flat wordmark array is unterminated")
-    arr_end = tail + 1  # past the closing ]
+    if body.find(b"[", arr_start + 1, close) >= 0:
+        raise RuntimeError("flat wordmark array carries a nested bracket")
+    arr_end = close + 1
 
     block = body[arr_start:arr_end]
     return {
@@ -459,19 +486,38 @@ def locate_flat(data, offset, size, base):
 
 
 def locate_pins(data, offset, size, base):
-    """Resolve the 14-string peg board literal in byte space."""
+    """Resolve the 14-string peg board literal in byte space.
+
+    The literal is a run of PIN_ROWS backtick strings of exactly PIN_COLUMNS
+    cells each, so it is found by its shape: 14 consecutive matches of the cell
+    alphabet, then the closing bracket. No local name is involved.
+    """
     body_start = base + offset
     body = data[body_start: body_start + size]
 
-    at = body.find(MARKER_PINS)
-    if at < 0:
-        raise RuntimeError("peg board literal not found")
-    lit_start = at + len(b"li=")
-    lit_end = body.find(TERM_PINS, lit_start)
-    if lit_end < 0:
-        raise RuntimeError("peg board literal is unterminated")
+    hits = list(PIN_CELL.finditer(body))
+    if len(hits) != PIN_ROWS:
+        raise RuntimeError(
+            "peg board literal not found: %d row(s) of %d cells, expected %d"
+            % (len(hits), PIN_COLUMNS, PIN_ROWS)
+        )
+    for left, right in zip(hits, hits[1:]):
+        if right.start() != left.end() + 1 or body[left.end():left.end() + 1] != b",":
+            raise RuntimeError("peg board rows are not contiguous")
 
-    block = body[lit_start: lit_end + 1]
+    lit_start = hits[0].start() - 1
+    lit_end = hits[-1].end()
+    if body[lit_start:lit_start + 1] != b"[":
+        raise RuntimeError("peg board literal is malformed")
+    # A patched bundle pads between the last row and the closing bracket, so the
+    # bracket is searched past any run of spaces the previous pass left behind.
+    bracket = lit_end
+    while bracket < len(body) and body[bracket:bracket + 1] == b" ":
+        bracket += 1
+    if body[bracket:bracket + 1] != b"]":
+        raise RuntimeError("peg board literal is malformed")
+
+    block = body[lit_start: bracket + 1]
     if not block.endswith(b"]"):
         raise RuntimeError("peg board literal is malformed")
     return {
@@ -485,22 +531,36 @@ def locate_pins(data, offset, size, base):
 
 
 # The creature that rides the wordmark is placed by a run of flat constants:
-# Y = hover anchor and neck base, X = pack target, Z = notch home. The notch
+# X = hover anchor and neck base, Z = pack target, Q = notch home. The notch
 # rect and the two drag-grip rects are expressed separately. Every span below
 # is byte-length identical to the shipped one, so the bundle never shifts.
+#
+# Each span anchors on the shipped *numbers*, never on the binding name. The
+# minifier renames `Y/X/Z` to `X/Z/Q` between builds and the patch must not care.
 #
 # `legacy` holds shapes this tool wrote in an earlier pass. The grip span is the
 # one that moved the crew: the first release rewrote BOTH branches of the hit
 # rect, which parked the visible grab zone on the wordmark while the creature
-# rests at `ia` (x=246, past the viewBox). Pulled out, it had no grabbable
-# surface left, so it could never be dropped back into the notch. Only the
-# hidden branch needs to follow the notch; the visible branch keeps the shipped
-# park geometry.
+# rests past the viewBox. Pulled out, it had no grabbable surface left, so it
+# could never be dropped back into the notch. Only the hidden branch needs to
+# follow the notch; the visible branch keeps the shipped park geometry.
 ROUTE_SPANS = (
     {
-        "label": "lodger anchors",
-        "old": b"Y={x:222,y:15},X={x:222,y:21},Z={x:226.5,y:10.5}",
-        "new": b"Y={x:207,y:15},X={x:207,y:21},Z={x:207.0,y:10.5}",
+        "label": "lodger neck anchor",
+        "old": b"{x:222,y:15}",
+        "new": b"{x:207,y:15}",
+        "legacy": (),
+    },
+    {
+        "label": "lodger pack anchor",
+        "old": b"{x:222,y:21}",
+        "new": b"{x:207,y:21}",
+        "legacy": (),
+    },
+    {
+        "label": "lodger notch anchor",
+        "old": b"{x:226.5,y:10.5}",
+        "new": b"{x:207.0,y:10.5}",
         "legacy": (),
     },
     {
@@ -518,16 +578,18 @@ ROUTE_SPANS = (
     # The pin-drop leg of the carry animation lerps to a bare literal pair
     # (233, 18) that sits past the end of the old eight-glyph wordmark. ZZZCODE
     # ends at x=219, so the drop has to happen over the final E, not beyond it.
+    # The two call shapes are `$(NAME,233,…)` and `$(233,NAME,…)`, so the span is
+    # keyed on the punctuation around the number, not on the helper's name.
     {
         "label": "pin drop out",
-        "old": b"$(ia,233,ya(t))",
-        "new": b"$(ia,207,ya(t))",
+        "old": b",233,",
+        "new": b",207,",
         "legacy": (),
     },
     {
         "label": "pin drop back",
-        "old": b"$(233,ia,ya(r))",
-        "new": b"$(207,ia,ya(r))",
+        "old": b"(233,",
+        "new": b"(207,",
         "legacy": (),
     },
 )
@@ -577,26 +639,38 @@ def locate_spans(data, offset, size, base):
 
 
 
-def locate(data, offset, size, base, marker, viewbox):
+def locate(data, offset, size, base, label, viewbox):
     """Resolve one wordmark template in byte space.
 
-    Byte offsets matter: the bundle carries multi-byte UTF-8 ahead of the
-    template, so character indexes do not line up with asar offsets.
+    The template is a tagged literal: `NAME(`<svg … viewBox="…" …>`)`. The tag
+    name is minified on every build, so the viewBox is the anchor and the
+    literal open is the nearest `(` + backtick before it. Byte offsets matter:
+    the bundle carries multi-byte UTF-8 ahead of the template, so character
+    indexes do not line up with asar offsets.
     """
     body_start = base + offset
     body = data[body_start: body_start + size]
 
-    at = body.find(marker)
+    at = body.find(viewbox)
     if at < 0:
-        raise RuntimeError("template %r not found" % marker)
-    lit_start = at + len(marker)
-    lit_end = body.find(b"`", lit_start)
+        raise RuntimeError("%s: viewBox %r not found" % (label, viewbox))
+    if body.count(viewbox) != 1:
+        raise RuntimeError("%s: viewBox %r is not unique" % (label, viewbox))
+
+    open_at = body.rfind(TEMPLATE_OPEN, 0, at)
+    if open_at < 0:
+        raise RuntimeError("%s: template open not found before the viewBox" % label)
+    lit_start = open_at + len(TEMPLATE_OPEN)
+    if not body[lit_start:lit_start + 4] == b"<svg":
+        raise RuntimeError("%s: template literal does not start with <svg" % label)
+
+    lit_end = body.find(b"`", at)
     if lit_end < 0:
-        raise RuntimeError("template literal is unterminated")
+        raise RuntimeError("%s: template literal is unterminated" % label)
 
     literal = body[lit_start:lit_end]
     if viewbox not in literal:
-        raise RuntimeError("viewBox %r not found in template" % viewbox)
+        raise RuntimeError("%s: viewBox %r not found in template" % (label, viewbox))
 
     first = literal.find(PATH_OPEN)
     if first < 0:
@@ -627,14 +701,14 @@ def locate(data, offset, size, base, marker, viewbox):
 
 def plan(data, index, base):
     main_name, main_off, main_size = renderer_bundle(index)
-    route_name, route_off, route_size = flat_route(index)
+    route_name, route_off, route_size = flat_route(data, index, base)
     jobs = []
 
-    for label, marker, viewbox, art in (
-        ("hero", MARKER_HERO, VIEWBOX_HERO, build_hero(WORD)),
-        ("splash", MARKER_SPLASH, VIEWBOX_SPLASH, build_splash(WORD)),
+    for label, viewbox, art in (
+        ("hero", VIEWBOX_HERO, build_hero(WORD)),
+        ("splash", VIEWBOX_SPLASH, build_splash(WORD)),
     ):
-        spot = locate(data, main_off, main_size, base, marker, viewbox)
+        spot = locate(data, main_off, main_size, base, label, viewbox)
         spot.update(kind="art", label=label, member=main_name, art=art)
         jobs.append(spot)
 
