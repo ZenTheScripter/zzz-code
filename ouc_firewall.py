@@ -54,7 +54,7 @@ def install_killswitch() -> tuple[bool, str]:
             f"remoteip={_PUBLIC_RANGES}",
             "profile=any",
             "enable=yes",
-            "description=Opencode Unlimited: force opencode-cli through localhost zen-proxy/WARP",
+            "description=ZzZ Code: force opencode-cli through localhost zen-proxy/WARP",
         ],
         timeout=10.0,
     )

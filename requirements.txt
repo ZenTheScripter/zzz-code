@@ -1,4 +1,4 @@
-# Opencode Unlimited Dependencies
+# ZzZ Code dependencies
 # Core GUI & WebView runtime
 pywebview>=5.0.0
 pythonnet>=3.0.0

@@ -888,7 +888,7 @@ def _make_handler(warp_state: _WarpState):
                         _mark_fallback(host, f"CONNECT {host}:{port} used the direct route ({exc})")
                     except Exception as exc2:
                         _record_event("error", f"CONNECT {host}:{port}: {exc2}", host)
-                        self._send_err(503, "Service Unavailable", f"Opencode Unlimited could not reach {host}:{port}. {exc2}")
+                        self._send_err(503, "Service Unavailable", f"ZzZ Code could not reach {host}:{port}. {exc2}")
                         return
 
                 edge = warp_state.current_edge()
@@ -928,7 +928,7 @@ def _make_handler(warp_state: _WarpState):
                     _mark_fallback(host, f"HTTP {host}:{port} used the direct route ({exc})")
                 except Exception as exc2:
                     _record_event("error", f"HTTP {host}:{port}: {exc2}", host)
-                    self._send_err(503, "Service Unavailable", f"Opencode Unlimited could not reach {host}:{port}. {exc2}")
+                    self._send_err(503, "Service Unavailable", f"ZzZ Code could not reach {host}:{port}. {exc2}")
                     return
 
             edge = warp_state.current_edge()

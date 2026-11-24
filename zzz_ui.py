@@ -198,7 +198,7 @@ def _probe_http(url: str, proxy: str | None, timeout: float = PROBE_TIMEOUT) -> 
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "opencode-unlimited-probe/3.0",
+            "User-Agent": "zzzcode-probe/1.1",
             "Cache-Control": "no-cache",
             "Accept": "*/*",
         },

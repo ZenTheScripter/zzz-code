@@ -1,6 +1,8 @@
 # ZzZ Code
 
-A modified OpenCode desktop client for Windows, kept by **ZenZenitoZeno**.
+A Windows control center for free and open-source AI clients, kept by
+**ZenZenitoZeno**. OpenCode is the first client it drives; the egress lane, the theme
+layer and the diagnostics are written to outlive that one client.
 
 > **Educational and research use only.**
 >

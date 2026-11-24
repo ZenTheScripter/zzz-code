@@ -213,7 +213,7 @@ def main() -> int:
     elif proxy_up:
         _warn(f"service proxy listening on 127.0.0.1:{svc_port}, but service.json not wired - re-run install.bat")
     else:
-        _warn(f"Desktop/service proxy not listening on 127.0.0.1:{svc_port} - restart OpencodeUnlimited-Keeper")
+        _warn(f"Desktop/service proxy not listening on 127.0.0.1:{svc_port} - restart the ZzZ Code keeper task")
 
     which_oc = shutil.which("opencode")
     expected_shim = str(BIN_DIR / "opencode.cmd").lower()
