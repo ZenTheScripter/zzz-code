@@ -1,46 +1,3 @@
-#!/usr/bin/env python3
-"""
-ZzZ Code -- console-only launcher for the rebranded opencode runtime.
-
-Pure console. No WebView, no GUI surface. It stages `zzzcode.exe` (a
-length-preserving rebranded copy of opencode.exe) under local app data,
-reuses the OpenCode-Unlimited WARP / /64-rotation stack recovered from the
-shipped control-center build, and exposes the same toggles through a text menu.
-
-Vanilla guarantee: nothing the vendor installed is left modified. The CLI is a
-*staged copy*; the desktop bundle is patched for the duration of a ZzZ session
-and restored the moment the app exits.
-
-The abliterated instruction sheet is not bundled. It is fetched from the project
-repository the first time the composer toggle is flipped (cached under
-`~/.zzzcode/instructions/AGENTS.md`, 12 h TTL) and copied into the folders
-opencode has open, silently. Settings > `Jailbreak all opened folders` does the
-same across every project the session databases remember.
-
-A machine that has never run this before gets Cloudflare WARP and the WebView2
-runtime installed through winget before the menu paints; later boots see them
-present and touch nothing.
-
-Layout it expects next to itself:
-
-    ZzZCode.exe | zzzcode_app.py
-    ZzZ Code.bat
-    patch_desktop.py            <- desktop asar art, apply/restore lifecycle
-    zzz_patch.py                <- CLI binary wordmark
-    ouc_common.py, zen_proxy.py, zen_lane.py, ...   <- lane, WARP and guard modules
-    ui/index.html               <- Control Center page
-    assets/zzz.ico              <- window icon
-    jailbreaks/AGENTS.md        <- abliterated sheet source (fetched, not bundled)
-
-Self-dispatch flags (internal, used for elevated/detached work):
-
-    --worker keeper              run the WARP keeper loop
-    --worker guard               run the zen-guard quota detector
-    --desktop-restore <pid>      wait for the desktop app, then restore vanilla
-    --firewall install           install the egress kill-switch (needs admin)
-    --firewall remove            remove it
-"""
-
 from __future__ import annotations
 
 import ctypes
@@ -64,17 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-# ---------------------------------------------------------------- encoding --
 def _pin_utf8() -> None:
-    """Force UTF-8 on the console and on stdout/stderr.
-
-    Reconfiguring the Python stream alone is not enough. A console opened with
-    the default Windows code page (437, 850, 1252) still decodes the bytes it
-    receives with that page, so every block glyph, bullet and accent arrives as
-    `????`. The code page has to move to 65001 first, then the stream, and the
-    order matters: setting the stream first makes the console reinterpret bytes
-    written before the change.
-    """
     if sys.platform == "win32":
         try:
             ctypes.windll.kernel32.SetConsoleOutputCP(65001)
@@ -91,27 +38,22 @@ def _pin_utf8() -> None:
 
 _pin_utf8()
 
-# --------------------------------------------------------------------- paths
 
 FROZEN = bool(getattr(sys, "frozen", False))
 APP_ROOT = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
 
-# The patched runtime never lives next to the launcher: it is staged into the
-# user's local app data so a read-only or shared install folder cannot block the
-# rewrite, and so re-running the launcher never touches the vendor copy.
+
 LOCAL_ROOT = Path(
     os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
 ) / "ZzZCode"
 WORK_BIN = LOCAL_ROOT / "bin"
-STAGED = WORK_BIN / "opencode.exe"     # pristine copy, patched before rename
-PATCHED = WORK_BIN / "zzzcode.exe"     # what the launcher actually runs
+STAGED = WORK_BIN / "opencode.exe"
+PATCHED = WORK_BIN / "zzzcode.exe"
 LEGACY_PATCHED = APP_ROOT / "bin" / "zzzcode.exe"
 
 STATE_DIR = Path.home() / ".zzzcode"
-# The staged runtime is a 1.x build; the desktop app ships a 2.x CLI that owns
-# ~/.local/share/opencode and migrates its database forward. Sharing that
-# directory makes the staged CLI abort with "Database is not empty and has no
-# session table", so the CLI keeps its own XDG data root.
+
+
 CLI_DATA_DIR = STATE_DIR / "data"
 DATA_DIR_DESKTOP = Path.home() / ".local" / "share" / "opencode"
 STORE_DESKTOP_DB = DATA_DIR_DESKTOP / "opencode.db"
@@ -126,7 +68,6 @@ GUARD_MUTEX = "OpencodeUnlimitedGuard"
 
 
 def _bootstrap_path() -> None:
-    """Put the lane, WARP and guard modules on sys.path."""
     roots = []
     if FROZEN:
         meipass = getattr(sys, "_MEIPASS", None)
@@ -140,7 +81,7 @@ def _bootstrap_path() -> None:
 
 _bootstrap_path()
 
-from ouc_common import (  # noqa: E402
+from ouc_common import (
     KEEPER_LOG_FILE,
     GUARD_LOG_FILE,
     LANE_DIR,
@@ -177,12 +118,11 @@ from ouc_common import (  # noqa: E402
     warp_service_stop,
     warp_status,
 )
-from ouc_firewall import install_killswitch, is_killswitch_installed, remove_killswitch  # noqa: E402
-from proxy_chain import get_egress_config, rotate_custom_proxy, set_egress_config  # noqa: E402
-from zen_lane import _ensure_warp_up  # noqa: E402
-from zen_proxy import start_proxy_server  # noqa: E402
+from ouc_firewall import install_killswitch, is_killswitch_installed, remove_killswitch
+from proxy_chain import get_egress_config, rotate_custom_proxy, set_egress_config
+from zen_lane import _ensure_warp_up
+from zen_proxy import start_proxy_server
 
-# --------------------------------------------------------------------- ansi
 
 VT = True
 
@@ -200,11 +140,6 @@ def _enable_vt() -> bool:
 
 
 def _p(code: str, text: str) -> str:
-    """Colour only when the output is a terminal that understands VT.
-
-    A redirected stream (`> log.txt`, a service, a CI capture) keeps plain text:
-    escape codes in a log file are noise, and some viewers choke on them.
-    """
     if not VT:
         return text
     try:
@@ -251,9 +186,6 @@ def c_bold(t):
     return _p("1", t)
 
 
-# Matrix ladder. One hue, five rungs: the border is almost black-green, the
-# accent is the neon, and nothing on a page leaves that ramp. Cyan, magenta and
-# amber still exist for state, but a menu row never uses them.
 def c_lime(t):
     return _p("38;5;118", t)
 
@@ -266,11 +198,6 @@ def c_slate(t):
     return _p("38;5;238", t)
 
 
-# ---------------------------------------------------------------------- art
-
-# 5x7 cap bitmap, one column of gutter between glyphs, rendered as four text
-# rows of half blocks. Wider than the shipped wordmark so the header reads as a
-# wordmark rather than a caption.
 _FONT = {
     "Z": ("#####", "....#", "...#.", "..#..", ".#...", "#....", "#####"),
     "C": (".####", "#....", "#....", "#....", "#....", "#....", ".####"),
@@ -282,18 +209,17 @@ _FONT = {
 
 FONT_W = 5
 FONT_H = 7
-GRID_H = 8            # one spare pixel row so a one-pixel drop shadow fits
+GRID_H = 8
 ADVANCE = FONT_W + 1
-GAP = 4               # advance for a space glyph
+GAP = 4
 
-# Pink -> cyan ramp; index picked by column so the wordmark reads as one object.
+
 _GRAD = ("38;5;199", "38;5;206", "38;5;177", "38;5;141", "38;5;105",
          "38;5;69", "38;5;45")
 _SHADOW = "38;5;237"
 
 
 def _grid(word: str) -> list[list[bool]]:
-    """Rasterise `word` into GRID_H pixel rows."""
     cells = []
     width = 0
     for ch in word.upper():
@@ -327,7 +253,6 @@ def _cell(top: bool, bottom: bool) -> str:
 
 
 def render_word(word: str = "ZZZ CODE") -> list[str]:
-    """Four text rows, shaded left-to-right, with a one-pixel drop shadow."""
     grid = _grid(word)
     height = len(grid)
     width = len(grid[0])
@@ -371,7 +296,6 @@ _VERSION_CACHE: str | None = None
 
 
 def clear_screen() -> None:
-    """Wipe the console so the next page starts on clean glass."""
     if VT:
         sys.stdout.write("\x1b[2J\x1b[H")
         sys.stdout.flush()
@@ -383,7 +307,6 @@ def clear_screen() -> None:
 
 
 def banner_lines(word: str = "ZZZ CODE") -> list[str]:
-    """Rendered ASCII art, built once per process."""
     global _BANNER_CACHE
     if _BANNER_CACHE is None:
         _BANNER_CACHE = render_word(word)
@@ -394,7 +317,6 @@ MARGIN = "  "
 
 
 def print_banner(word: str = "ZZZ CODE") -> None:
-    """Clear the console and paint the wordmark plus the runtime line."""
     clear_screen()
     print()
     for line in banner_lines(word):
@@ -413,11 +335,6 @@ def print_banner(word: str = "ZZZ CODE") -> None:
 
 
 def _runtime_version() -> str:
-    """Version string of the staged runtime, probed once and cached.
-
-    Spawning zzzcode.exe costs a process launch; menus repaint the banner on
-    every selection, so the probe must not run per frame.
-    """
     global _VERSION_CACHE
     if _VERSION_CACHE is not None:
         return _VERSION_CACHE
@@ -434,7 +351,6 @@ def _runtime_version() -> str:
 
 
 def _art_state_line() -> str:
-    """Wordmark state for the banner: staged CLI art and desktop art."""
     cli = "cli art ok" if PATCHED.is_file() else "cli art missing"
     desktop = "desktop art idle"
     try:
@@ -452,13 +368,10 @@ def _art_state_line() -> str:
     return "%s  \u00b7  %s" % (cli, desktop)
 
 
-# ------------------------------------------------------------------- output
-
 SPIN = "|/-\\"
 
 
 def step(label: str, ok: bool = True, detail: str = "") -> None:
-    """One boot line: a state mark, a label, and its reason in the ash column."""
     mark = c_lime("\u2713") if ok else c_yellow("!")
     tail = ("  " + c_ash(detail)) if detail else ""
     print("%s%s %s%s" % (MARGIN, mark, c_white(label) if not ok else label, tail))
@@ -481,23 +394,12 @@ def working(label: str, seconds: float = 0.45, detail: str = "") -> None:
     sys.stdout.flush()
 
 
-# --------------------------------------------------------------------- pages
-
 PANEL_INNER = 58
-NOTE_MAX = 30          # widest the right column may grow before it is clamped
-_MENU_ANIM = {"left": 3}   # menu paints still allowed to animate before settling
+NOTE_MAX = 30
+_MENU_ANIM = {"left": 3}
 
 
 def _panel_rows(title: str, rows: list[tuple[str, str, str, str]]) -> list[str]:
-    """Rendered panel lines, header and rows on one exact width.
-
-    Geometry, in plain columns:
-        top     `┌─▓ TITLE ` + dashes + `┐`      = inner + 4
-        row     `│ ` + content (inner) + ` │`     = inner + 4
-        bottom  `└` + dashes (inner + 2) + `┘`    = inner + 4
-    Every piece is built to that total, so the three line up to the character
-    at any title length.
-    """
     inner = PANEL_INNER
     label = title.upper()
     fill = max(0, inner - 3 - len(label))
@@ -529,7 +431,6 @@ _MARK_CACHE: list[str] | None = None
 
 
 def _wordmark_rows() -> list[str]:
-    """Wordmark rows: tinted on a terminal, plain when the output is redirected."""
     global _MARK_CACHE
     if _MARK_CACHE is None:
         try:
@@ -549,12 +450,6 @@ def _wordmark_rows() -> list[str]:
 
 
 def heading(title: str, sub: str = "") -> None:
-    """Clear glass, repaint the wordmark, then the animated banner and the title.
-
-    The intro runs once at boot; every page after that gets the same wordmark
-    instantly. The banner above the panel animates on the first couple of paints
-    and lands static afterwards, so navigating never re-triggers the intro.
-    """
     clear_screen()
     print()
     for line in _wordmark_rows():
@@ -578,12 +473,6 @@ def heading(title: str, sub: str = "") -> None:
 
 
 def panel(title: str, rows: list[tuple[str, str, str, str]]) -> None:
-    """Bordered block. Rows are (plain left, colored left, plain right, colored right).
-
-    The first couple of paints after the intro assemble the panel one line at a
-    time; after that it lands in a single write so repeated navigation never
-    feels laggy.
-    """
     lines = _panel_rows(title, rows)
     if _MENU_ANIM["left"] > 0 and _intro_available():
         _MENU_ANIM["left"] -= 1
@@ -604,12 +493,6 @@ _ANSI = re.compile("\\x1b\\[[0-9;]*m")
 
 
 def _fit_note(left_plain: str, note: str) -> str:
-    """Clamp the right column so the panel keeps one column of breathing room.
-
-    The note column is capped as well. `keeper \u00b7 guard \u00b7 proxy \u00b7 stealth`
-    used to run right up against its label, so the second column started at a
-    different place on every row; capped, the notes read as one flush block.
-    """
     room = max(4, min(PANEL_INNER - len(left_plain) - 2, NOTE_MAX))
     if len(note) <= room:
         return note
@@ -617,12 +500,6 @@ def _fit_note(left_plain: str, note: str) -> str:
 
 
 def row(num: str, label: str, on: bool | None = None, note: str = "") -> tuple[str, str, str, str]:
-    """A menu row: key, label, then a state chip, a dim note, or both.
-
-    When a row carries both state and detail the note wins the column and the
-    chip becomes its leading mark, so `warp-cli` can read `off  not installed`
-    instead of losing the reason it is off.
-    """
     left_plain = "[%s] %s" % (num, label)
     left_color = c_lime("[%s]" % num) + " " + c_white(label)
     if on is not None and note:
@@ -648,11 +525,6 @@ def spacer() -> tuple[str, str, str, str]:
 
 
 def group(label: str) -> tuple[str, str, str, str]:
-    """A divider row: `▸ label` and a rule that runs to the right border.
-
-    Sectioning beats a taller list of equal rows: the eye files the page into
-    run / maintain / leave without reading a word of the notes.
-    """
     text = "\u25b8 " + label.lower()
     rule = "\u2500" * max(0, PANEL_INNER - len(text) - 1)
     plain = text + " " + rule
@@ -660,17 +532,10 @@ def group(label: str) -> tuple[str, str, str, str]:
 
 
 def footer(keys: str, hint: str = "") -> None:
-    """One dim line under the panel. The keys live on the prompt itself.
-
-    Printing the key list twice (footer and prompt) read like two different
-    controls on one page, so the footer carries only the hint.
-    """
     print()
     if hint:
         print(MARGIN + c_faint(hint))
 
-
-# ------------------------------------------------------------ state probes
 
 def mutex_held(name: str) -> bool:
     try:
@@ -703,7 +568,6 @@ def strict_mode() -> bool:
 
 
 def desktop_service_wired() -> bool:
-    """True when service.json routes the desktop/background service at the lane."""
     env = _load_service_cfg().get("env") or {}
     return ("127.0.0.1:%d" % keeper_port()) in str(env.get("HTTPS_PROXY", ""))
 
@@ -716,15 +580,12 @@ DESKTOP_PS = (
 
 
 def desktop_pids() -> list[int]:
-    """PIDs of the installed desktop app, ignoring anything else named OpenCode."""
     try:
         res = run_hidden(["powershell.exe", "-NoProfile", "-Command", DESKTOP_PS], timeout=20.0)
         return [int(line) for line in (res.stdout or "").split() if line.strip().isdigit()]
     except Exception:
         return []
 
-
-# -------------------------------------------------------------------- state
 
 _STATE_DEFAULTS = {
     "inject_agents": False,
@@ -783,8 +644,6 @@ def _save_workers(data: dict) -> None:
         pass
 
 
-# ------------------------------------------------------------------ workers
-
 def _worker_cmd(name: str) -> list[str]:
     if FROZEN:
         return [str(Path(sys.executable).resolve()), "--worker", name]
@@ -799,11 +658,6 @@ def worker_pid(name: str) -> int | None:
 
 
 def keeper_port() -> int:
-    """Live keeper port - the recorded port outranks the compiled default.
-
-    The keeper picks its own port when 41987 is refused and writes it to
-    lane/proxy_port.txt, so every probe here has to ask the file first.
-    """
     return service_proxy_port()
 
 
@@ -876,8 +730,6 @@ def worker_toggle(name: str, enable: bool) -> tuple[bool, str]:
     return worker_start(name) if enable else worker_stop(name)
 
 
-# --------------------------------------------------- desktop service proxy
-
 _SERVICE_ENV_KEYS = (
     "HTTPS_PROXY",
     "HTTP_PROXY",
@@ -887,8 +739,7 @@ _SERVICE_ENV_KEYS = (
     "no_proxy",
 )
 
-# The desktop app and its background server share this file; `env` is merged
-# into the server process environment before it dials any provider.
+
 SERVICE_CFG = Path.home() / ".config" / "opencode" / "service.json"
 
 
@@ -908,13 +759,6 @@ def _write_service_cfg(cfg: dict) -> None:
 
 
 def desktop_proxy_set(enable: bool) -> tuple[bool, str]:
-    """Point the desktop background service at the persistent lane proxy.
-
-    `opencode service set env` existed in older CLIs; on 1.18.x the subcommand
-    is gone, so the same state is written directly to service.json. The
-    `password` key is preserved - regenerating it invalidates the desktop's
-    stored session.
-    """
     proxy_url = "http://127.0.0.1:%d" % keeper_port()
     cfg = _load_service_cfg()
     env = dict(cfg.get("env") or {})
@@ -1035,7 +879,6 @@ _EDGE_ROWS: dict[str, object] = {"n": 0, "at": 0.0, "busy": False}
 
 
 def _edge_refresh() -> None:
-    """One bounded pool lookup, off the paint path."""
     try:
         _EDGE_ROWS["n"] = len(fetch_opencode_aaaa_pool(timeout=1.6))
     except Exception:
@@ -1046,13 +889,6 @@ def _edge_refresh() -> None:
 
 
 def edge_rows() -> int:
-    """Live AAAA count for the edge re-roll row, cached for five minutes.
-
-    The lookup is three DoH round trips plus a resolver call: behind a cold
-    tunnel that runs past ten seconds, and the settings page used to sit blank
-    for that whole time because it was built inline. The page now paints the last
-    known count and a daemon thread refreshes it behind the paint.
-    """
     if not _EDGE_ROWS["busy"] and time.time() - float(_EDGE_ROWS["at"]) > 300:
         _EDGE_ROWS["busy"] = True
         threading.Thread(target=_edge_refresh, daemon=True).start()
@@ -1060,29 +896,11 @@ def edge_rows() -> int:
 
 
 def edge_rows_label() -> str:
-    """'12 AAAA' once known, 'probing' while the first lookup is in flight."""
     count = edge_rows()
     if count:
         return "%d AAAA" % count
     return "probing" if _EDGE_ROWS["busy"] else "no AAAA"
 
-
-# --------------------------------------------------- stealth AGENTS.md feed
-#
-# Two different loaders ship in this install:
-#
-#   1.18.27  Instruction service reads `join(config,"AGENTS.md")` in global scope
-#            and honours a config document reached through `OPENCODE_CONFIG`.
-#   2.2.6    ConfigInstructionPlugin reads `instructions` off every loaded config
-#            document; `OPENCODE_CONFIG` is ignored outright (verified: probe
-#            values never reach `debug config`).
-#
-# The one channel both builds agree on is the `instructions` array in the config
-# document they already load, so the toggle merges a single absolute path into
-# `~/.config/opencode/opencode.json` for the duration of a session. The previous
-# bytes are copied aside and go back on exit, so opening opencode any other way
-# finds the file exactly as it was. The content never appears as a chat part and
-# no project file is touched.
 
 CONFIG_DOC = Path.home() / ".config" / "opencode" / "opencode.json"
 CONFIG_BACKUP = STATE_DIR / "opencode_json.bak"
@@ -1090,9 +908,7 @@ AGENTS_STATE = STATE_DIR / "agents_inject.json"
 INSTRUCTION_DIR = STATE_DIR / "instructions"
 MCP_DOC = INSTRUCTION_DIR / "mcp-self-setup.md"
 
-# Loopback bridge the composer switch talks to. Fixed port: the renderer payload
-# ships as a static script and cannot be told a random one. Only bound while a
-# desktop session runs; a failed bind just means the switch stays local.
+
 BRIDGE_PORT = 47654
 
 
@@ -1101,7 +917,6 @@ def inject_enabled() -> bool:
 
 
 def find_agents_md() -> Path | None:
-    """AGENTS.md from the launch directory upward, then the install's own."""
     here = Path.cwd()
     for depth, parent in enumerate((here, *here.parents)):
         if depth > 6:
@@ -1174,7 +989,6 @@ anyway with a placeholder and name the one variable the user must fill.
 
 
 def mcp_doc() -> Path:
-    """Write the managed instruction block and return its path."""
     INSTRUCTION_DIR.mkdir(parents=True, exist_ok=True)
     if not MCP_DOC.is_file() or MCP_DOC.read_text(encoding="utf-8") != MCP_POLICY:
         MCP_DOC.write_text(MCP_POLICY, encoding="utf-8")
@@ -1182,12 +996,6 @@ def mcp_doc() -> Path:
 
 
 def _desired_entries() -> list[str]:
-    """Instruction files that must be listed for the current session.
-
-    The MCP block rides every session - it is only a capability note. The persona
-    document is the switch: the composer toggle (or Settings [7] on the CLI) turns
-    it on, and when it is off nothing about it is referenced anywhere.
-    """
     entries = []
     try:
         entries.append(str(mcp_doc()))
@@ -1211,12 +1019,6 @@ def _config_doc() -> tuple[bytes, dict]:
 
 
 def _ours_paths() -> set:
-    """Instruction files this launcher owns, whatever the state file says.
-
-    A stale config left behind by an older build, or a deleted state file, must
-    not keep the persona listed while the switch is off, so the paths are
-    derived from the launcher's own constants instead of from history.
-    """
     paths = {str(MCP_DOC)}
     persona = find_agents_md()
     if persona is not None:
@@ -1225,12 +1027,6 @@ def _ours_paths() -> set:
 
 
 def inject_sync() -> tuple[bool, str]:
-    """Make the config's `instructions` match what this session should carry.
-
-    Runs at launch and again whenever the composer switch moves: with the switch
-    off the document is left holding nothing of ours, so the persona cannot ride
-    a session that never asked for it.
-    """
     state = _agents_state()
     active = bool(state.get("active"))
     managed = _ours_paths()
@@ -1250,8 +1046,8 @@ def inject_sync() -> tuple[bool, str]:
         listed = []
     kept = [x for x in listed if x not in managed]
     merged = kept + [entry for entry in desired if entry not in kept]
-    # Only the entries we introduced are ours to strip later; anything the user
-    # already listed is left alone on revert.
+
+
     ours = [entry for entry in desired if entry not in kept]
 
     if not merged:
@@ -1260,9 +1056,8 @@ def inject_sync() -> tuple[bool, str]:
         return True, "instructions already current"
 
     payload = (json.dumps({**doc, "instructions": merged}, indent=2) + "\n").encode("utf-8")
-    # A path of ours already sitting in the document means an older session never
-    # cleaned up. Restoring that document on exit would put the persona straight
-    # back, so the cleaned payload becomes the new baseline instead.
+
+
     healed = any(x in managed for x in listed)
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -1303,11 +1098,10 @@ def inject_apply() -> tuple[bool, str]:
 
 
 def inject_revert() -> tuple[bool, str]:
-    """Restore the config document byte for byte."""
     state = _agents_state()
     entries = [str(x) for x in state.get("entries", [])] if state.get("active") else []
     if not state.get("active"):
-        if CONFIG_BACKUP.is_file():  # interrupted session: finish the restore
+        if CONFIG_BACKUP.is_file():
             try:
                 CONFIG_DOC.write_bytes(CONFIG_BACKUP.read_bytes())
                 CONFIG_BACKUP.unlink()
@@ -1326,8 +1120,7 @@ def inject_revert() -> tuple[bool, str]:
     except OSError as exc:
         return False, "revert read failed: %s" % str(exc)[:48]
 
-    # The document was edited while the session ran: keep that edit and only
-    # drop our paths, so nothing someone typed into their config is lost.
+
     if _digest(current) != state.get("wrote_sha"):
         try:
             doc = json.loads(current.decode("utf-8"))
@@ -1360,36 +1153,22 @@ def inject_revert() -> tuple[bool, str]:
 
 
 def inject_set(enable: bool) -> tuple[bool, str]:
-    """Turn the persona feed on or off and apply it to the config right away."""
     if enable and find_agents_md() is None:
-        # The sheet is fetched at runtime and never bundled, so a project opened
-        # for the first time has nothing for the toggle to point at. Drop it into
-        # the folders this session is working in before deciding it is missing.
+
+
         text = jailbreak_payload(timeout=6.0)
         if text:
             jailbreak_drop(_nearby_folders(), text, overwrite=False)
     if enable and find_agents_md() is None:
         return False, "no AGENTS.md found from %s" % Path.cwd()
     save_state(inject_agents=bool(enable))
-    INJECT_CFG.unlink(missing_ok=True)  # drop any config-document leftover
+    INJECT_CFG.unlink(missing_ok=True)
     ok, msg = inject_sync()
     label = "ON" if enable else "OFF"
     if not ok:
         return False, "abliterated %s \u00b7 %s" % (label, msg)
     return True, "abliterated %s \u00b7 %s" % (label, msg)
 
-
-# ----------------------------------------------------------------- jailbreak
-#
-# The abliterated sheet is not shipped inside the bundle: it is fetched from the
-# project repository on first use, cached under the launcher's state directory,
-# and copied into the folders opencode actually has open. Silent by design - the
-# drop happens from the composer toggle or from Settings > ZzZ Code, never as a
-# chat part and never as a file the user is told about.
-#
-# Fetching goes through a proxy-less opener on purpose: the launcher points
-# HTTPS_PROXY at its own listener, and a fetch through that path would loop back
-# into the tunnel that is being configured.
 
 JAILBREAK_URLS = (
     "https://raw.githubusercontent.com/ZenTheScripter/zzz-code/main/jailbreaks/AGENTS.md",
@@ -1413,7 +1192,6 @@ def _jailbreak_meta() -> dict:
 
 
 def _http_direct(url: str, timeout: float = 20.0) -> bytes:
-    """Fetch a URL without the launcher's proxy environment in the way."""
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     request = urllib.request.Request(
         url,
@@ -1440,11 +1218,6 @@ def _cached_sheet() -> bytes:
 
 
 def jailbreak_bytes(refresh: bool = False, timeout: float = 20.0) -> bytes:
-    """The abliterated sheet: cache first, network second, repo copy last.
-
-    Held as bytes end to end - the drop writes it verbatim, so the copy in a
-    project folder is byte-identical to the one upstream.
-    """
     cached = _cached_sheet()
     fresh = cached and (time.time() - float(_jailbreak_meta().get("at") or 0)) < JAILBREAK_TTL
     if fresh and not refresh:
@@ -1473,7 +1246,7 @@ def jailbreak_bytes(refresh: bool = False, timeout: float = 20.0) -> bytes:
     if cached:
         return cached
 
-    # Offline and never cached: this install ships the same sheet at its root.
+
     fallback = APP_ROOT / "AGENTS.md"
     if fallback.is_file():
         try:
@@ -1488,7 +1261,6 @@ def jailbreak_payload(refresh: bool = False, timeout: float = 20.0) -> str:
 
 
 def _opencode_dbs() -> list[Path]:
-    """Session databases, most canonical last-write first."""
     roots = [Path.home() / ".local" / "share" / "opencode"]
     local = os.environ.get("LOCALAPPDATA", "").strip()
     if local:
@@ -1502,8 +1274,6 @@ def _opencode_dbs() -> list[Path]:
     return out
 
 
-# (table, directory column, recency column). Every table is optional: the two
-# database files do not carry the same schema, and either can be mid-migration.
 _DB_QUERIES = (
     ("project", "worktree", "time_updated"),
     ("worktree", "directory", None),
@@ -1585,13 +1355,6 @@ def _clean_dir(value: str) -> str | None:
 
 
 def opened_folders(limit: int = FOLDER_LIMIT) -> list[str]:
-    """Every directory opencode has a project or session record for.
-
-    Read from the session databases rather than from UI state: the renderer is
-    not reachable from here, and a folder that was opened once is still a folder
-    the next launch can be pointed at. Scratch directories under %TEMP% are
-    dropped - they are probe leftovers, not projects.
-    """
     seen: set = set()
     out: list[str] = []
     for db in _opencode_dbs():
@@ -1607,7 +1370,6 @@ def opened_folders(limit: int = FOLDER_LIMIT) -> list[str]:
 
 
 def _nearby_folders(count: int = 3) -> list[str]:
-    """The working directory plus the most recent projects - the toggle's scope."""
     folders: list[str] = []
     here = _clean_dir(str(Path.cwd()))
     if here:
@@ -1624,16 +1386,6 @@ def _nearby_folders(count: int = 3) -> list[str]:
 def jailbreak_drop(
     folders: list[str], payload: bytes | str | None = None, overwrite: bool = True
 ) -> tuple[int, list[str]]:
-    """Write the sheet into each folder, keeping a differing copy aside.
-
-    A project that already carries its own AGENTS.md is not silently destroyed:
-    the original bytes go to `AGENTS.md.zzz.bak` once, before the first overwrite.
-    Read-only trees (Steam, Program Files) fail the write and are reported, never
-    retried in a loop.
-
-    `overwrite=False` is the composer toggle's path: it only needs one sheet to
-    point at, so a folder that already has one is left exactly as it is.
-    """
     if payload is None:
         blob = jailbreak_bytes()
     elif isinstance(payload, bytes):
@@ -1666,7 +1418,6 @@ def jailbreak_drop(
 
 
 def jailbreak_all(refresh: bool = True) -> tuple[bool, str]:
-    """Fetch the sheet and drop it into every folder opencode has open."""
     folders = opened_folders()
     if not folders:
         return False, "no opened folders recorded yet"
@@ -1680,26 +1431,7 @@ def jailbreak_all(refresh: bool = True) -> tuple[bool, str]:
     return written > 0, detail
 
 
-
-# --------------------------------------------------------------- cold start
-#
-# WARP used to follow Windows up: the client service starts at logon and the
-# tunnel comes with it because the client reports `Always On: true`. The
-# launcher only wants the tunnel while a ZzZ session is open, so the service is
-# parked on demand start, the cold marker keeps the keeper parked as well, and a
-# launch takes both back for the length of the session.
-#
-#   ~/.zzzcode/warp_cold      exists  -> WARP must stay down at boot
-#   ~/.zzzcode/session.active exists  -> a launcher session holds it open
-
-
 def _elevate(params: str, wait_for: str = "") -> str:
-    """Relaunch this binary elevated. Returns "" when it ran, else the reason.
-
-    `sc config` needs admin, so the cold-start policy cannot be applied from a
-    standard-user session. One UAC prompt on the first switch is the whole cost;
-    the result is recorded in state.json so later boots stay silent.
-    """
     if FROZEN:
         exe, args = sys.executable, params
     else:
@@ -1717,19 +1449,6 @@ def _elevate(params: str, wait_for: str = "") -> str:
 
 
 def warp_cold_apply(stop: bool = True) -> tuple[bool, str]:
-    """Enforce the cold policy: service on demand, and - only when parking - tunnel down.
-
-    `stop=False` is the boot mode. It corrects the start type so WARP stays dark
-    at the next logon, but never touches a live tunnel, because killing the
-    connection the user is currently working through is what made WARP look like
-    it kept falling over. `stop=True` is the park that runs when a session ends,
-    and it is the only caller allowed to disconnect.
-
-    The start-type change needs admin; stopping a running instance does not,
-    because the one-time grant gives the interactive user stop rights on this
-    service. So when the start type is already `demand` - the normal case after
-    the first install and after every park - parking completes with no UAC.
-    """
     if not warp_cold():
         return True, "WARP follows the service (cold start off)"
 
@@ -1811,7 +1530,6 @@ def warp_cold_set(enable: bool) -> tuple[bool, str]:
 
 
 def cold_seed() -> None:
-    """Cold start is the default for a fresh install; an explicit choice sticks."""
     if load_state().get("warp_cold_set"):
         return
     save_state(warp_cold_set=True)
@@ -1819,14 +1537,6 @@ def cold_seed() -> None:
 
 
 def warp_bringup() -> tuple[bool, str]:
-    """Open the tunnel window for a launch.
-
-    With the cold policy in force the service is on demand start, so a launch has
-    to wake it. When the interactive user has the one-time grant that is a plain
-    `sc start`; when the grant is missing the launcher asks for UAC once, starts
-    the service elevated, and records nothing else - the next launch takes the
-    fast path again.
-    """
     set_session_active(True)
     if not warp_cold():
         return True, "warm"
@@ -1843,33 +1553,11 @@ def warp_bringup() -> tuple[bool, str]:
 
 
 def warp_park() -> tuple[bool, str]:
-    """Close the session and put WARP back to cold.
-
-    The Cloudflare client re-marks its own service automatic every time it
-    connects, so a demand start set once does not survive a launch: the launch
-    starts the service, the client rewrites the start type, and the tunnel comes
-    back at the next logon. Parking after every session is what actually keeps
-    WARP dark at boot.
-
-    Parking is the only caller that is allowed to stop a running tunnel. A boot
-    that merely finds the start type warm fixes the type and leaves the tunnel
-    alone - killing a live connection on every boot is what made WARP look like
-    it kept falling over.
-    """
     if not warp_cold():
         set_session_active(False)
         return True, "cold start off \u00b7 tunnel left alone"
     return warp_cold_apply(stop=True)
 
-
-# ------------------------------------------------------------------- egress
-#
-# Four routes, one config file. The keeper re-reads it every tick, so a switch
-# here takes effect without restarting the stack.
-#   warp   - Cloudflare tunnel (default), pinned IPv6 lane
-#   tor    - managed portable Tor, SOCKS5 on 9050
-#   custom - a proxy list, rotated per connection
-#   clean  - direct egress, no tunnel
 
 EGRESS_MODES = ("warp", "tor", "custom", "clean")
 
@@ -1915,7 +1603,7 @@ def egress_proxy_set(raw: str) -> tuple[bool, str]:
     if kind not in ("socks5", "socks4", "http", "https"):
         return False, "unsupported proxy type %r" % kind[:12]
     rest = rest.strip("/")
-    if "@" in rest:  # credentials are kept out of the config file on purpose
+    if "@" in rest:
         return False, "credentials belong in the proxy client, not the config"
     host, _, port = rest.partition(":")
     if not host or not port.isdigit():
@@ -1934,7 +1622,6 @@ def egress_proxy_set(raw: str) -> tuple[bool, str]:
 
 
 def tor_state() -> tuple[bool, str]:
-    """(usable, note) for the Tor egress without importing it twice."""
     try:
         from tor_manager import get_active_tor_target, is_portable_tor_running
     except Exception as exc:
@@ -1959,34 +1646,17 @@ def tor_toggle(enable: bool) -> tuple[bool, str]:
     return stop_portable_tor()
 
 
-# -------------------------------------------------------------------- themes
-#
-# Themes are CSS custom-property overrides painted onto `document.documentElement`
-# by the renderer payload. Inline custom properties beat the app's own `:root`
-# block, so a palette repaints the whole shell without touching the theme store
-# and without leaving a trace once the session's renderer closes.
-#
-# Users drop `*.json` files in `~/.zzzcode/themes/`:
-#
-#   {"name": "Mine", "author": "me", "colors": {"--v2-background-bg-base": "#0b0b10"}}
-#
-# Any `--v2-*` token the bundle declares can be overridden; values are checked
-# against a conservative CSS-value pattern so a theme file cannot smuggle a rule
-# break or a `url()` into the page.
-
 THEMES_DIR = STATE_DIR / "themes"
 THEMES_ACTIVE = THEMES_DIR / "active.json"
 THEMES_GUIDE = THEMES_DIR / "README.md"
 THEME_VALUE_RE = re.compile(r"^[#a-zA-Z0-9(),.% +-]{1,64}$")
 THEME_KEY_RE = re.compile(r"^--[a-zA-Z0-9-]{1,64}$")
-# A wallpaper is a CSS gradient, never an image: no URL to fetch, nothing the
-# vendor CSP has to allow, and the whole value is one auditable line. The charset
-# is the same one the colour values allow, so a theme file cannot smuggle a rule.
+
+
 THEME_WALL_RE = re.compile(r"^(?:linear|radial|conic)-gradient\([#a-zA-Z0-9(),.% +-]{1,300}\)$")
 THEME_LIMIT = 64
 
-# id, name, kind, bg, layer1..4, text, muted, faint, border, strong,
-# accent-bg, accent-text, accent-hover, optional wallpaper gradient
+
 _BUILTIN_THEMES = (
     ("noir", "ZzZ Noir", "dark", "#161616", "#1d1d1d", "#242424", "#2e2e2e", "#3a3a3a",
      "#fafafa", "#aeaeae", "#7a7a7a", "#2a2a2a", "#3a3a3a", "#4b8fd0", "#a2bcff", "#c7d7ff"),
@@ -2239,7 +1909,7 @@ def themes_reset() -> tuple[bool, dict]:
 def themes_open() -> tuple[bool, dict]:
     ensure_themes()
     try:
-        os.startfile(str(THEMES_DIR))  # noqa: S606 - Explorer, user-facing
+        os.startfile(str(THEMES_DIR))
     except Exception as exc:
         return False, {"detail": str(exc)[:64]}
     return True, {"detail": str(THEMES_DIR)}
@@ -2249,9 +1919,8 @@ TEMPLATE_THEME = {
     "name": "My Theme",
     "author": "you",
     "kind": "dark",
-    # Optional: one CSS gradient, painted as a soft wash over the whole window.
-    # Anything that is not `linear-`, `radial-` or `conic-gradient(...)` is
-    # ignored on load, so a typo costs the wash and nothing else.
+
+
     "wall": "radial-gradient(120% 90% at 15% 0%, #24103f 0%, #0f1117 62%)",
     "colors": {
         "--v2-background-bg-base": "#0f1117",
@@ -2413,11 +2082,11 @@ is why no theme needs an asset and nothing has to be fetched at paint time:
 Every surface in the shell is one of four layers stacked on a base. Get the
 steps right and the rest follows:
 
-- `base` — the page. This is the colour you see behind everything.
-- `layer-01` — one step away from the page: the sidebar, the settings rail.
-- `layer-02` — two steps: cards, the composer, list rows at rest.
-- `layer-03` — three steps: a row under the pointer, the selected tab pill.
-- `layer-04` — four steps: a row being clicked, the outline of a text input.
+- `base` - the page. This is the colour you see behind everything.
+- `layer-01` - one step away from the page: the sidebar, the settings rail.
+- `layer-02` - two steps: cards, the composer, list rows at rest.
+- `layer-03` - three steps: a row under the pointer, the selected tab pill.
+- `layer-04` - four steps: a row being clicked, the outline of a text input.
 
 A dark palette steps **up** in lightness (each layer a touch lighter than the
 one below). A light palette steps **down** (each layer a touch darker). Six to
@@ -2566,7 +2235,6 @@ properties on `documentElement` for the length of the session.
 
 
 def ensure_themes() -> None:
-    """Create the theme folder and the guide on first run."""
     try:
         THEMES_DIR.mkdir(parents=True, exist_ok=True)
         if not THEMES_GUIDE.is_file():
@@ -2575,22 +2243,11 @@ def ensure_themes() -> None:
         pass
 
 
-# ------------------------------------------------------------------- updates
-#
-# Off by default. Flipped on from Settings > ZzZ Code; when it is on the
-# launcher reads the project repository through the public GitHub API, and a
-# newer release (or a newer commit on `main`) is applied without a prompt.
-#
-# Two update lanes, because there are two binaries:
-#   zzz       our launcher - a release asset `ZzZCode.exe` when the release
-#             carries one, otherwise the sources are staged from the archive
-#   opencode  the vendor runtime - newest npm version re-staged through
-#             `prepare_runtime(force=True)`, which also re-patches the wordmark
-
 APP_VERSION = "1.1.0"
 REPO_SLUG = "ZenTheScripter/zzz-code"
 GH_API = "https://api.github.com/repos/%s" % REPO_SLUG
 GH_ARCHIVE = "https://codeload.github.com/%s/zip/refs/heads/main" % REPO_SLUG
+GH_VERSION = "https://raw.githubusercontent.com/%s/main/VERSION" % REPO_SLUG
 NPM_LATEST = "https://registry.npmjs.org/opencode-ai/latest"
 UPDATES_FILE = STATE_DIR / "updates.json"
 UPDATE_STAGE = STATE_DIR / "updates"
@@ -2610,6 +2267,7 @@ def updates_state() -> dict:
     data.setdefault("zzz_commit", "")
     data.setdefault("zzz_tag", "")
     data.setdefault("zzz_version", APP_VERSION)
+    data.setdefault("zzz_published", APP_VERSION)
     data.setdefault("opencode_version", "")
     data.setdefault("checked", 0)
     data.setdefault("zzz_available", "")
@@ -2677,22 +2335,37 @@ def _installed_opencode_version() -> str:
     return text[0].strip() if text else ""
 
 
-def check_zzz_update() -> dict:
-    """Compare the repo head (release tag or main commit) with what we ran last."""
-    state = updates_state()
-    tag = ""
-    asset = ""
+def _gh_text(url: str, timeout: float = 12.0) -> str:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "ZzZCode/%s" % APP_VERSION}
+    )
+    with opener.open(request, timeout=timeout) as response:
+        return response.read(4096).decode("utf-8", "replace").strip()
+
+
+def _version_key(text: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for chunk in str(text or "").strip().lstrip("vV").replace("-", ".").split("."):
+        digits = "".join(character for character in chunk if character.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def published_version() -> str:
     try:
-        release = _gh_json(GH_API + "/releases/latest")
-        if isinstance(release, dict):
-            tag = str(release.get("tag_name") or "")
-            for entry in release.get("assets") or []:
-                name = str(entry.get("name") or "")
-                if name.lower().endswith(".exe"):
-                    asset = str(entry.get("browser_download_url") or "")
-                    break
+        text = _gh_text(GH_VERSION)
     except Exception:
-        tag = ""
+        return ""
+    first = text.splitlines()[0].strip() if text else ""
+    return first if re.match(r"^v?\d+(\.\d+)*$", first) else ""
+
+
+def check_zzz_update() -> dict:
+    state = updates_state()
+    published = published_version()
 
     commit = ""
     try:
@@ -2702,23 +2375,23 @@ def check_zzz_update() -> dict:
     except Exception:
         commit = ""
 
-    known_tag = state.get("zzz_tag") or ""
-    known_commit = state.get("zzz_commit") or ""
-    # An empty baseline is a first run, not an update: record what is upstream
-    # now and only advertise a change once it differs from this stamp.
-    armed = bool(known_tag or known_commit)
-    newer = armed and bool(
-        (tag and tag != known_tag)
-        or (commit and commit != known_commit)
-    )
-    available = (tag or commit[:7]) if newer else ""
+    local = APP_VERSION
+    newer = bool(published) and _version_key(published) > _version_key(local)
+    available = published if newer else ""
     updates_save(
-        zzz_tag=tag or known_tag,
-        zzz_commit=commit or known_commit,
+        zzz_version=local,
+        zzz_published=published or str(state.get("zzz_published") or local),
+        zzz_tag=available,
+        zzz_commit=commit or str(state.get("zzz_commit") or ""),
         zzz_available=available,
-        zzz_asset=asset,
+        zzz_asset="",
     )
-    return {"available": available, "tag": tag, "commit": commit, "asset": asset}
+    return {
+        "available": available,
+        "current": local,
+        "published": published,
+        "commit": commit,
+    }
 
 
 def check_opencode_update() -> dict:
@@ -2770,6 +2443,7 @@ def update_status(refresh: bool = False) -> dict:
         "auto": bool(state.get("auto")),
         "status": status,
         "version": APP_VERSION,
+        "published": str(state.get("zzz_published") or APP_VERSION),
         "zzz": {"available": zzz_available, "tag": state.get("zzz_tag") or ""},
         "opencode": {
             "available": oc_available,
@@ -2794,7 +2468,6 @@ def updates_auto_set(enabled: bool) -> tuple[bool, dict]:
 
 
 def _replace_exe(payload: Path) -> tuple[bool, str]:
-    """Swap the launcher binary on disk. Windows allows renaming a running exe."""
     target = Path(sys.executable).resolve() if FROZEN else APP_ROOT / "ZzZCode.exe"
     backup = target.with_name("ZzZCode.prev.exe")
     try:
@@ -2820,8 +2493,7 @@ def _stage_sources(archive: Path, commit: str) -> tuple[bool, str]:
     roots = [p for p in dest.iterdir() if p.is_dir()]
     root = roots[0] if roots else dest
 
-    # Frozen builds cannot pick up .py sources, so the archive is staged and the
-    # copy next to the launcher is only refreshed when we run from source.
+
     if FROZEN:
         return True, "sources staged at %s" % root
     copied = 0
@@ -2891,7 +2563,6 @@ def apply_updates(which: str) -> tuple[bool, str]:
 
 
 def updates_auto_run() -> None:
-    """Background pass at boot: check, then apply whatever is staged."""
     state = updates_state()
     if not state.get("enabled"):
         return
@@ -2912,36 +2583,15 @@ def updates_auto_run() -> None:
 
 
 def updates_spawn_check() -> None:
-    """Fire the boot check off the console thread."""
     if not updates_state().get("enabled"):
         return
     threading.Thread(target=updates_auto_run, daemon=True).start()
 
 
-
-
-
-# ------------------------------------------------------------------- bridge
-#
-# The composer switch lives in the renderer, which has no filesystem access. It
-# posts here and the launcher rewrites the config document. GET answers the real
-# state, so a fresh renderer with empty localStorage still shows the truth.
-#
-# Routes: `/state` (persona feed), `/folders`, `/jailbreak`, `/themes*`,
-# `/update*`, `/diagnostics`, `/crash/*`, `/stack/verify`, `/workers/restart`
-# and `/templates/*`. Unknown paths are a 404 so a stale renderer fails loudly
-# instead of silently treating an error page as state.
-
 CRASH_LOG = STATE_DIR / "crash.log"
 
 
 def diagnostics() -> dict:
-    """One flat snapshot for the settings panel and for a bug report.
-
-    Every value is read defensively: the panel renders whatever this returns, so
-    a missing WARP, a half-installed desktop or a locked crash log degrades to a
-    string instead of taking the bridge down.
-    """
     last = ""
     try:
         if CRASH_LOG.is_file():
@@ -2985,9 +2635,7 @@ def diagnostics() -> dict:
     except Exception:
         runtime = "?"
 
-    # The staged 1.x CLI cannot read the 2.x database the desktop app migrates
-    # forward, which surfaces to the user as a bare "Unexpected error". Report
-    # both stores so that mismatch is visible instead of silent.
+
     try:
         if _runtime_major() >= 2:
             store = "shared - %s" % DATA_DIR_DESKTOP
@@ -3021,7 +2669,7 @@ def crash_open() -> tuple[bool, dict]:
     if not CRASH_LOG.is_file():
         return False, {"detail": "no crash log on disk"}
     try:
-        os.startfile(str(CRASH_LOG))  # noqa: S606 - user-facing, opens in the editor
+        os.startfile(str(CRASH_LOG))
     except Exception as exc:
         return False, {"detail": str(exc)[:64]}
     return True, {"detail": str(CRASH_LOG)}
@@ -3036,11 +2684,6 @@ def crash_clear() -> tuple[bool, dict]:
 
 
 def stack_verify() -> tuple[bool, dict]:
-    """Read the stack without repairing it.
-
-    `stack_ensure` rerolls the edge and rotates the /64, which is a repair pass
-    and takes tens of seconds; the panel button only needs to say what is up.
-    """
     try:
         v6 = get_warp_local_v6()
     except Exception:
@@ -3084,7 +2727,6 @@ def stack_verify() -> tuple[bool, dict]:
 
 
 def workers_restart() -> tuple[bool, dict]:
-    """Stop then start keeper and guard, in that order, and report each stage."""
     notes = []
     ok = True
     for name in ("keeper", "guard"):
@@ -3105,12 +2747,6 @@ def workers_restart() -> tuple[bool, dict]:
             notes.append("%s start failed: %s" % (name, str(exc)[:32]))
     return ok, {"detail": " \u00b7 ".join(notes)}
 
-
-# ---------------------------------------------------------------- templates
-#
-# Snippets appended to the project's AGENTS.md from the settings panel. They are
-# plain text on purpose: the same bytes a reader would paste by hand, so nothing
-# in this table can surprise a reviewer, and the append is idempotent per title.
 
 TEMPLATE_PACK = (
     (
@@ -3213,7 +2849,6 @@ def templates_list() -> dict:
 
 
 def templates_save(tid: str) -> tuple[bool, dict]:
-    """Append one template to the project's AGENTS.md, once."""
     entry = None
     for row in TEMPLATE_PACK:
         if row[0] == tid:
@@ -3261,10 +2896,10 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def do_OPTIONS(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler naming
+    def do_OPTIONS(self) -> None:
         self._reply(204, {})
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         route = self._route()
         if route == "/folders":
             folders = opened_folders()
@@ -3284,7 +2919,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             return
         self._reply(200, {"enabled": inject_enabled()})
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         route = self._route()
         try:
             length = min(int(self.headers.get("Content-Length") or 0), 4096)
@@ -3374,16 +3009,12 @@ class _BridgeHandler(BaseHTTPRequestHandler):
 
 
 class _BridgeServer(ThreadingHTTPServer):
-    """Windows lets SO_REUSEADDR steal a live port, so it is turned off here:
-    a second launcher gets a clean failure instead of silently sharing a socket
-    with a stale bridge."""
 
     allow_reuse_address = False
     daemon_threads = True
 
 
 def start_bridge() -> ThreadingHTTPServer | None:
-    """Bind the switch bridge for the life of this launcher process."""
     try:
         server = _BridgeServer(("127.0.0.1", BRIDGE_PORT), _BridgeHandler)
     except OSError:
@@ -3394,14 +3025,11 @@ def start_bridge() -> ThreadingHTTPServer | None:
     return server
 
 
-# --------------------------------------------------------------- launching
-
 def _wait_for_pid(pid: int) -> None:
-    """Block until `pid` exits. Falls back to polling when the handle is denied."""
     try:
         k32 = ctypes.windll.kernel32
         k32.OpenProcess.restype = ctypes.c_void_p
-        handle = k32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        handle = k32.OpenProcess(0x00100000, False, pid)
         if handle:
             try:
                 k32.WaitForSingleObject(ctypes.c_void_p(handle), 0xFFFFFFFF)
@@ -3410,7 +3038,7 @@ def _wait_for_pid(pid: int) -> None:
             return
     except Exception:
         pass
-    for _ in range(172800):  # two days at one second
+    for _ in range(172800):
         if pid not in desktop_pids():
             return
         time.sleep(1.0)
@@ -3440,7 +3068,6 @@ def _spawn_restore_watcher(pid: int) -> bool:
 
 
 def stack_state() -> dict:
-    """Snapshot of every component the proxy path needs, without changing anything."""
     warp = find_warp_cli()
     connected, mode, note = (False, "", "")
     if warp:
@@ -3461,14 +3088,6 @@ def stack_state() -> dict:
 
 
 def stack_ensure(max_rounds: int = 3) -> tuple[bool, str]:
-    """Bring WARP, keeper, lane proxy and guard up and prove the path end to end.
-
-    Every stage is verified rather than assumed: a listening port is not a
-    working proxy, and a connected WARP client is not a usable /64. Each repair
-    step is followed by a real TLS probe through the live keeper port, so
-    the caller only gets a success when opencode.ai is actually reachable over
-    the pinned tunnel.
-    """
     warp = find_warp_cli()
     if not warp:
         return False, "warp-cli.exe not found - install Cloudflare WARP"
@@ -3521,13 +3140,6 @@ def stack_ensure(max_rounds: int = 3) -> tuple[bool, str]:
 
 
 def _recycle_service() -> tuple[bool, str]:
-    """Stop a stale `opencode-cli serve --service` so it restarts on the new env.
-
-    The desktop reuses whatever background service is already listening. That
-    process snapshots its environment at spawn time, so a service started before
-    service.json was wired keeps dialing providers directly no matter what the
-    file says afterwards.
-    """
     ps = (
         "Get-CimInstance Win32_Process -Filter \"Name='opencode-cli.exe'\" | "
         "Where-Object { $_.CommandLine -like '*serve*--service*' } | "
@@ -3555,11 +3167,10 @@ def desktop_apply() -> tuple[bool, str]:
 
 
 def desktop_restore_now() -> tuple[bool, str]:
-    """Undo everything a ZzZ desktop session changed."""
     notes = []
     ok_all = True
-    # The session window is over the moment restore runs: the tunnel goes back
-    # to cold, which is also what a stock opencode launch expects to find.
+
+
     set_session_active(False)
     park_ok, park_msg = warp_park()
     if not park_ok:
@@ -3585,12 +3196,11 @@ def desktop_restore_now() -> tuple[bool, str]:
 
 
 def desktop_restore_worker(pid: int) -> int:
-    """Detached: hold the process until the app closes, then go vanilla."""
     _wait_for_pid(pid)
-    time.sleep(1.2)  # let the app release its file handles
+    time.sleep(1.2)
     for _ in range(20):
         if desktop_pids():
-            return 0  # another window is still up; its own watcher owns the state
+            return 0
         ok, msg = desktop_restore_now()
         if ok:
             _log_restore(msg)
@@ -3674,8 +3284,8 @@ def launch_desktop() -> None:
     worker_start("guard")
 
     working("Bringing WARP + keeper + lane proxy up", 0.6)
-    # The cold policy parks the tunnel and the service between sessions; a launch
-    # is the window that reopens both. The restore watcher closes it again.
+
+
     warp_bringup()
     ok, msg = stack_ensure()
     step("proxy path verified", ok=ok, detail=msg)
@@ -3739,13 +3349,6 @@ def launch_desktop() -> None:
 
 
 def _cli_prepare():
-    """Bring up the tunnel and the lane, and build the child environment.
-
-    Split out of `launch_cli` so `--cli` can run the runtime in the console it
-    was started from: a shim on PATH has no lane of its own, and a CLI with no
-    route to the network is a CLI that looks like it never started.
-    Returns (server, port, env) or None when a step refused.
-    """
     if not PATCHED.is_file():
         step("zzzcode.exe is not staged", ok=False, detail="run Repair patch from the main menu")
         return None
@@ -3753,7 +3356,7 @@ def _cli_prepare():
     v6 = get_warp_local_v6()
     if not v6:
         working("Bringing the WARP tunnel up", 0.6)
-        set_session_active(True)  # cold start: a launch reopens the tunnel
+        set_session_active(True)
         v6 = _ensure_warp_up()
     if not v6:
         set_session_active(False)
@@ -3786,8 +3389,8 @@ def _cli_prepare():
         srv.shutdown()
         srv.server_close()
         return None
-    # A 2.x runtime migrates the desktop's database forward and reads it as-is,
-    # so it shares the store. A 1.x build cannot and gets a private one.
+
+
     if _runtime_major() < 2:
         env["XDG_DATA_HOME"] = str(CLI_DATA_DIR)
         step("session store", detail="private \u00b7 %s" % CLI_DATA_DIR)
@@ -3813,12 +3416,6 @@ def _cli_teardown(srv, port: int) -> None:
 
 
 def run_cli(argv: list[str] | None = None) -> int:
-    """Run the staged runtime in this console, on a fresh lane.
-
-    This is what the PATH shims call. It is the same stack `launch_cli` opens,
-    minus the extra window: the runtime inherits this terminal, so a shim typed
-    by hand behaves exactly like the menu entry.
-    """
     heading("Launch \u00b7 CLI", "zzzcode.exe in this terminal")
     prepared = _cli_prepare()
     if prepared is None:
@@ -3845,8 +3442,7 @@ def launch_cli() -> None:
     srv, port, env = prepared
     proxy_url = "http://127.0.0.1:%d" % port
 
-    # A generated .cmd avoids nested-quote mangling: `start` re-parses its
-    # command line, and a quoted path with arguments cannot survive that intact.
+
     script = STATE_DIR / "launch_cli.cmd"
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -3888,17 +3484,7 @@ def launch_cli() -> None:
         _cli_teardown(srv, port)
 
 
-# --------------------------------------------------------------- runtime staging
-
 def _source_runtime() -> Path | None:
-    """Vendor opencode.exe that the staged copy is built from.
-
-    The desktop-managed CLI comes first: it is the build the app itself runs,
-    it is the newest one on disk, and it is the one whose database the staged
-    copy has to be able to read. The standalone `~/.opencode/bin` install is
-    the fallback -- it is frequently an old 1.x that predates the current
-    schema, and staging it strands the CLI on a database it cannot open.
-    """
     candidates: list[Path] = []
     cli = find_opencode_cli()
     if cli:
@@ -3914,7 +3500,6 @@ def _source_runtime() -> Path | None:
 
 
 def _runtime_major() -> int:
-    """Major version of the staged runtime, 0 when it cannot be read."""
     text = _runtime_version()
     for token in text.replace("v", " ").split():
         if token[:1].isdigit():
@@ -3931,7 +3516,6 @@ def _reset_version_cache() -> None:
 
 
 def runtime_plan() -> str:
-    """'ready', 'stage', 'update' or 'missing' - decided before any writing."""
     source = _source_runtime()
     if source is None:
         return "ready" if PATCHED.is_file() else "missing"
@@ -3948,16 +3532,6 @@ def runtime_plan() -> str:
 
 
 def prepare_runtime(force: bool = False) -> tuple[bool, str, bool]:
-    """Stage, patch and rename the runtime under %LOCALAPPDATA%\\ZzZCode.
-
-    Order matters: the copy is written as `opencode.exe`, patched while it still
-    carries that name, and only renamed to `zzzcode.exe` once the rewrite has
-    succeeded. A crash mid-patch therefore never leaves a corrupt binary under
-    the name the launcher trusts.
-
-    The source fingerprint is stored next to the state, so a vendor update is
-    detected on the next boot and the copy is rebuilt instead of trusted.
-    """
     source = _source_runtime()
     if source is None:
         if PATCHED.is_file():
@@ -4019,22 +3593,13 @@ def prepare_runtime(force: bool = False) -> tuple[bool, str, bool]:
     return True, str(PATCHED), updated
 
 
-# ---------------------------------------------------------------------- menus
-
 try:
     import msvcrt as _msvcrt
-except Exception:  # non-Windows, or a frozen build without the module
+except Exception:
     _msvcrt = None
 
 
 def _prompt(keys: str = "0123456789") -> str:
-    """Read one key. `c` repaints the page, `q` leaves the page.
-
-    On Windows this is a real single-key read: the menu reacts on the press, no
-    Enter needed, and an unknown key is ignored with a short beep instead of
-    redrawing the page. When stdin is not a terminal (piped input, a CI run) it
-    falls back to line input so scripts can still drive the launcher.
-    """
     shown = keys if "c" in keys else keys + " c"
     label = MARGIN + c_lime("zzz\u25b8 ") + c_slate("[%s] " % shown)
     if _msvcrt is not None:
@@ -4045,7 +3610,7 @@ def _prompt(keys: str = "0123456789") -> str:
                 while True:
                     ch = _msvcrt.getwch()
                     if ch in ("\x00", "\xe0"):
-                        _msvcrt.getwch()      # swallow the second half of a special key
+                        _msvcrt.getwch()
                         continue
                     if ch in ("\r", "\n"):
                         continue
@@ -4069,16 +3634,10 @@ def _prompt(keys: str = "0123456789") -> str:
 
 
 def _console_input() -> bool:
-    """True only when stdin is a real console handle.
-
-    `sys.stdin.isatty()` also says yes for NUL and for a detached stdin, where
-    `getwch()` never returns a key and the prompt hangs forever. GetConsoleMode
-    fails on every non-console handle, which is the check that actually holds.
-    """
     if _msvcrt is None:
         return False
     try:
-        handle = ctypes.windll.kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        handle = ctypes.windll.kernel32.GetStdHandle(-10)
         mode = ctypes.c_uint32()
         return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
     except Exception:
@@ -4086,12 +3645,6 @@ def _console_input() -> bool:
 
 
 def _hold(hint: str = "enter returns to the menu") -> None:
-    """Keep an action log on screen until the reader dismisses it.
-
-    repair_patch, doctor and vanilla_restore print their findings and the menu
-    loop repaints over them a few milliseconds later, so the output could not be
-    read. This blocks on one key first.
-    """
     print()
     label = "  " + c_faint(hint + " ")
     if _msvcrt is not None and _console_input():
@@ -4102,8 +3655,8 @@ def _hold(hint: str = "enter returns to the menu") -> None:
                 while True:
                     ch = _msvcrt.getwch()
                     if not ch or ch in ("\x00", "\x1a", "\x03"):
-                        # NUL stdin and Ctrl-C both read as a key; leaving the
-                        # loop is better than spinning on a dead handle.
+
+
                         break
                     if ch == "\xe0":
                         _msvcrt.getwch()
@@ -4287,12 +3840,6 @@ _STATUS: dict[str, object] = {"data": None, "at": 0.0, "busy": False}
 
 
 def _status_refresh() -> None:
-    """One full status pass, off the paint path.
-
-    warp-cli, the resolver, asar_state and the proxy probe together run past ten
-    seconds on a cold tunnel, and the page used to build all of it inline so the
-    console sat empty after the wordmark. Nothing here touches stdout.
-    """
     data: dict[str, object] = {"art": {"available": False, "patched": False, "pending": 0, "error": ""}}
     try:
         warp = find_warp_cli()
@@ -4324,17 +3871,11 @@ def _status_refresh() -> None:
 
 
 def status_snapshot(ttl: float = 8.0) -> dict[str, object]:
-    """Cached status pass; the refresh runs behind the paint.
-
-    Returns whatever was sampled last, so a page always paints instantly. The
-    first visit shows `probing` on the measured rows and the next visit shows the
-    real values. `c` forces a repaint without invalidating the cache.
-    """
     stale = time.time() - float(_STATUS["at"]) > ttl
     if stale and not _STATUS["busy"]:
         _STATUS["busy"] = True
         threading.Thread(target=_status_refresh, daemon=True).start()
-    return _STATUS["data"] or {}  # type: ignore[return-value]
+    return _STATUS["data"] or {}
 
 
 def status_page() -> None:
@@ -4454,13 +3995,6 @@ def vanilla_restore() -> None:
     print()
 
 
-# -------------------------------------------------------------- first run
-#
-# A machine that has never seen this project has no tunnel client and, on older
-# Windows builds, no WebView2 runtime for the desktop app. Both are installed
-# once through winget, quietly, before the menu paints - later boots read the
-# presence checks and touch nothing.
-
 PREREQ_STATE = STATE_DIR / "prereqs.json"
 _PREREQ_RETRY = 6 * 3600
 
@@ -4498,7 +4032,6 @@ def _write_prereq(data: dict) -> None:
 
 
 def _webview2_present() -> bool:
-    """Evergreen WebView2 registers its version under EdgeUpdate\\Clients."""
     for subkey in (
         "SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients",
         "SOFTWARE\\Microsoft\\EdgeUpdate\\Clients",
@@ -4556,7 +4089,6 @@ def _winget_install(package_id: str) -> tuple[bool, str]:
 
 
 def ensure_prerequisites(force: bool = False) -> None:
-    """Install Cloudflare WARP and the WebView2 runtime when they are missing."""
     state = _prereq_state()
     if not force and state.get("ok") and time.time() - float(state.get("at") or 0) < 86400:
         return
@@ -4569,8 +4101,8 @@ def ensure_prerequisites(force: bool = False) -> None:
     if not missing:
         _write_prereq({"ok": True, "at": int(time.time()), "installed": []})
         return
-    # A failed install is retried, but not on every launch - winget is slow and
-    # a machine without it will fail the same way twice an hour.
+
+
     if not force and not state.get("ok") and time.time() - float(state.get("at") or 0) < _PREREQ_RETRY:
         return
 
@@ -4595,19 +4127,11 @@ def ensure_prerequisites(force: bool = False) -> None:
     )
 
 
-# --------------------------------------------------------------- launchers
-#
-# Two things have to exist before "just run it" is true on a fresh machine: a
-# name on PATH so a terminal can open the menu, and an icon on the desktop so
-# there is something to click. Both are written here on every boot, idempotently
-# - a moved exe or a deleted shortcut heals on the next start.
-
 SHIM_DIR = LOCAL_ROOT / "cli"
 SHORT_NAME = "ZzZ Code"
 
 
 def _launcher_parts() -> tuple[str, str, str]:
-    """Target exe, its arguments, and the working directory for a shortcut."""
     exe = Path(sys.executable).resolve()
     if FROZEN:
         return str(exe), "", str(exe.parent)
@@ -4639,7 +4163,6 @@ def _shim_text(target: str, args: str = "", extra: list[str] | None = None) -> s
 
 
 def _path_ensure(folder: Path) -> bool:
-    """Add `folder` to the user PATH once. Returns True when it was added."""
     try:
         import winreg
     except Exception:
@@ -4654,11 +4177,16 @@ def _path_ensure(folder: Path) -> bool:
     except OSError:
         return False
     parts = [p for p in str(current).split(";") if p.strip()]
-    if any(p.strip().lower().rstrip("\\") == entry.lower().rstrip("\\") for p in parts):
-        return False
-    # Front of the user PATH: the shims must win over any stale zzzcode.exe
-    # an older install dropped in a bin folder.
-    parts.insert(0, entry)
+    wanted = entry.lower().rstrip("\\")
+    for index, part in enumerate(parts):
+        if part.strip().lower().rstrip("\\") == wanted:
+            if index == 0:
+                return False
+            parts.insert(0, parts.pop(index))
+            break
+    else:
+        parts.insert(0, entry)
+
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_WRITE) as key:
             winreg.SetValueEx(key, "Path", 0, kind or winreg.REG_EXPAND_SZ, ";".join(parts))
@@ -4674,7 +4202,6 @@ def _path_ensure(folder: Path) -> bool:
 
 
 def _shortcut(link: Path, target: str, args: str, workdir: str, icon: str) -> bool:
-    """Write a .lnk through WScript.Shell; silent failure, no console flash."""
     script = (
         "$w = New-Object -ComObject WScript.Shell; "
         "$s = $w.CreateShortcut('%s'); "
@@ -4694,29 +4221,20 @@ def _shortcut(link: Path, target: str, args: str, workdir: str, icon: str) -> bo
 
 
 def install_launchers() -> tuple[bool, str]:
-    """CLI shim + PATH entry + desktop and Start Menu icons.
-
-    Returns (changed, detail). Nothing here may abort a boot: a locked registry
-    or a policy that blocks shortcut creation leaves the menu working without
-    them, so every step is a best-effort write.
-    """
     target, args, workdir = _launcher_parts()
     changed = False
 
     for name in ("zzzcode.cmd", "zzz.cmd", "zzz-code.cmd"):
         changed |= _write_if_changed(SHIM_DIR / name, _shim_text(target, args))
     if PATCHED.is_file():
-        # The CLI shims go through the launcher (`--cli`) instead of calling the
-        # runtime directly: the runtime needs the zen lane in its environment,
-        # and the lane is opened per session. Called bare it starts, looks dead,
-        # and reaches nothing. `--cli` brings the tunnel up first, then hands the
-        # console over.
+
+
         cli_args = (args + " --cli").strip()
         changed |= _write_if_changed(
             SHIM_DIR / "zzzcode-cli.cmd", _shim_text(target, cli_args)
         )
-        # `opencode` is what the README promises and what a hand reaches for.
-        # SHIM_DIR sits ahead of the vendor bins on PATH, so this wins.
+
+
         changed |= _write_if_changed(
             SHIM_DIR / "opencode.cmd", _shim_text(target, cli_args)
         )
@@ -4752,12 +4270,6 @@ def install_launchers() -> tuple[bool, str]:
 
 
 def _crash_report(exc: BaseException) -> int:
-    """Log a fatal error, show it, and keep the window open.
-
-    A double-clicked launcher that raises used to print nothing and close, which
-    reads as "it does not start". The traceback now lands on screen and in
-    ~/.zzzcode/crash.log before anything exits.
-    """
     text = traceback.format_exc()
     try:
         ensure_dirs()
@@ -4780,25 +4292,12 @@ def _crash_report(exc: BaseException) -> int:
     return 1
 
 
-# ------------------------------------------------------------------- boot
-
-# --------------------------------------------------------------- intro stage
-#
-# Three stages, all skippable, all bounded:
-#   rain   -> green code rain fills the console
-#   mark   -> "MADE BY ZZZ" block art, painted dark then swept by a bright band
-#   menu   -> the first menu paint assembles line by line
-#
-# `ZZZ_NO_ANIM=1` or a redirected stdout turns the whole thing into a single
-# static paint, which is what a CI job or `| tee` gets.
-
 _INTRO_DONE = {"run": False}
 
 
 def _intro_available() -> bool:
-    """Whether the intro module imported. Separate from whether it animates."""
     try:
-        import zzz_intro  # noqa: F401
+        import zzz_intro
 
         return True
     except Exception:
@@ -4806,11 +4305,6 @@ def _intro_available() -> bool:
 
 
 def intro() -> None:
-    """Open the console: rain, wordmark, sweep, then the status banner.
-
-    A terminal gets the full sequence; a pipe, a service or `ZZZ_NO_ANIM=1`
-    gets the same wordmark painted once, with no cursor maths and no sleep.
-    """
     if _INTRO_DONE["run"]:
         return
     _INTRO_DONE["run"] = True
@@ -4819,8 +4313,8 @@ def intro() -> None:
 
         if zzz_intro.enabled():
             zzz_intro.intro_sequence("MADE BY ZZZ")
-            # Hold the finished art for a beat: the rain is gone, the word sits
-            # there lit, then the glass clears for the boot log.
+
+
             time.sleep(0.7)
             clear_screen()
             print()
@@ -4828,7 +4322,7 @@ def intro() -> None:
             zzz_intro.sweep("MADE BY ZZZ", step=3, delay=0.018, indent=3)
             print()
     except Exception:
-        # A console that refuses cursor moves must not take the boot with it.
+
         clear_screen()
         print_banner()
 
@@ -4846,9 +4340,8 @@ def boot() -> None:
             step("WARP cold start",
                  detail="service on demand \u00b7 tunnel %s" % ("up" if live else "parked"))
         else:
-            # Boot only fixes the start type. A tunnel that is already up stays
-            # up: the Cloudflare client rewrites the type on every connect, and
-            # treating that as "park it" disconnected the user on every boot.
+
+
             cold_ok, cold_msg = warp_cold_apply(stop=False)
             working("Holding WARP down", 0.5)
             step("WARP cold start", ok=cold_ok, detail=cold_msg)
@@ -4868,14 +4361,14 @@ def boot() -> None:
         working("Logging in...", 0.5)
         step("warp-cli.exe not found", ok=False, detail="WARP rotation disabled")
 
-    # Updates are off unless the toggle in Settings > ZzZ Code was flipped on.
+
     updates_spawn_check()
 
     plan = runtime_plan()
     if plan == "ready":
         step("Runtime staged", detail=str(PATCHED))
-        # Without a stored fingerprint the first vendor update would look like a
-        # first install instead of an update, so record the baseline now.
+
+
         if not load_state().get("cli_source_sha"):
             source = _source_runtime()
             if source is not None:
@@ -4908,14 +4401,12 @@ def boot() -> None:
     except Exception:
         pass
 
-    # A crash or a hard kill leaves the session-scoped inject on disk. Nothing is
-    # running yet at boot, so the previous global instruction file goes back now.
+
     if _agents_state().get("active") or CONFIG_BACKUP.is_file():
         ok, msg = inject_revert()
         step("Stealth feed left over", ok=ok, detail=msg)
 
-    # A name on PATH and an icon on the desktop, rewritten every boot so a moved
-    # exe or a deleted shortcut heals without a manual step.
+
     try:
         _launch_changed, launch_detail = install_launchers()
         step("Launchers", detail=launch_detail)
@@ -4928,8 +4419,8 @@ def boot() -> None:
 
 
 def main_menu() -> None:
-    # Every page clears and repaints itself, intro included: the boot art has
-    # already been retired by the time this loop starts.
+
+
     while True:
         heading("Main", "console runtime")
         panel(
@@ -4973,14 +4464,12 @@ def main_menu() -> None:
             _hold()
 
 
-# -------------------------------------------------------------- dispatch
-
 def _self_dispatch(argv: list[str]) -> int | None:
-    # `--cli` owns everything after it: `zzzcode --cli --version` must reach the
-    # runtime, not print the launcher's own version.
+
+
     if "--cli" in argv:
-        # The PATH shims route here: bring the lane up, then hand this console to
-        # the runtime so `opencode` typed anywhere behaves like the menu entry.
+
+
         index = argv.index("--cli")
         ensure_dirs()
         return run_cli(argv[index + 1:])
@@ -5057,8 +4546,8 @@ def _self_dispatch(argv: list[str]) -> int | None:
 
     if "--warp-start" in argv:
         ensure_dirs()
-        # This lane only runs elevated (it is the UAC fallback of a launch), so
-        # it is also the cheapest place to install the permanent user grant.
+
+
         grant_ok, grant_msg = warp_grant_user_start()
         print(grant_msg)
         ok, msg = warp_service_start()
@@ -5070,8 +4559,8 @@ def _self_dispatch(argv: list[str]) -> int | None:
         ensure_dirs()
         if action == "apply":
             set_warp_cold(True)
-            # The grant has to exist before the service is parked, otherwise the
-            # demand-start policy locks the launcher out of its own tunnel.
+
+
             grant_ok, grant_msg = warp_grant_user_start()
             print(grant_msg)
             warp = find_warp_cli()
@@ -5135,7 +4624,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except SystemExit:
         raise
-    except BaseException as exc:  # noqa: BLE001 - a launcher must never vanish
+    except BaseException as exc:
         return _crash_report(exc)
 
 

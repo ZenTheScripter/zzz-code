@@ -1,5 +1,3 @@
-"""Doctor for Windows: health check for WARP tunnel, background tasks, and lane shim."""
-
 from __future__ import annotations
 
 import ctypes
@@ -60,7 +58,7 @@ def _task_exists(task_name: str) -> bool:
 
 
 def main() -> int:
-    # Force UTF-8 output safely on Windows consoles
+
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -69,19 +67,19 @@ def main() -> int:
 
     print("")
     print("  =============================")
-    print("  ZzZ Code — doctor")
+    print("  ZzZ Code - doctor")
     print("  =============================")
     print("")
 
-    # 1. Keeper status
+
     if _is_mutex_held("OpencodeUnlimitedKeeper"):
         _ok("warp-keeper process: running")
     elif _task_exists(TASK_KEEPER):
-        _bad(f"warp-keeper down (task installed) — run: schtasks /Run /TN {TASK_KEEPER}")
+        _bad(f"warp-keeper down (task installed) - run: schtasks /Run /TN {TASK_KEEPER}")
     else:
-        _bad("warp-keeper not running & scheduled task missing — re-run install.ps1")
+        _bad("warp-keeper not running & scheduled task missing - re-run install.ps1")
 
-    # 2. Egress Mode Check (WARP, Tor, or Custom Proxy)
+
     mode = "warp"
     default_scope = "tun" if sys.platform == "win32" else "isolated"
     warp_scope = default_scope
@@ -106,9 +104,9 @@ def main() -> int:
                 else:
                     _warn(f"Tor process detected on {tor_target[0]}:{tor_target[1]}, but SOCKS5 probe failed")
             elif is_portable_tor_running():
-                _warn("Tor is starting up — establishing circuit...")
+                _warn("Tor is starting up - establishing circuit...")
             else:
-                _bad("Tor daemon not running — click 'Start Portable Tor' in app")
+                _bad("Tor daemon not running - click 'Start Portable Tor' in app")
         except Exception as exc:
             _bad(f"Tor check error: {exc}")
 
@@ -121,17 +119,17 @@ def main() -> int:
             _bad(f"custom proxy configuration error: {exc}")
 
     else:
-        # WARP Mode Check
+
         warp_bin = find_warp_cli()
         if not warp_bin:
-            _warn("warp-cli.exe not found — install Cloudflare WARP, or switch to Tor / Custom Proxy mode")
+            _warn("warp-cli.exe not found - install Cloudflare WARP, or switch to Tor / Custom Proxy mode")
         else:
             connected, warp_m, raw = warp_status(warp_bin)
             if connected:
                 mode_tag = f" (mode: {warp_m})" if warp_m else ""
                 _ok(f"warp tunnel: connected{mode_tag}")
             else:
-                _bad(f"warp not connected ({raw or 'unknown'}) — run opencode-unlimited-hop, or reconnect WARP from the dashboard")
+                _bad(f"warp not connected ({raw or 'unknown'}) - run opencode-unlimited-hop, or reconnect WARP from the dashboard")
 
         if warp_scope == "isolated":
             try:
@@ -139,7 +137,7 @@ def main() -> int:
                 if test_socks5_alive(40000, host="127.0.0.1"):
                     _ok("WARP isolated SOCKS5 proxy: active on 127.0.0.1:40000 (app-only mode)")
                 else:
-                    _warn("WARP isolated port 40000 not responding — reconnect WARP or switch the scope to Full TUN")
+                    _warn("WARP isolated port 40000 not responding - reconnect WARP or switch the scope to Full TUN")
             except Exception:
                 pass
         else:
@@ -147,9 +145,9 @@ def main() -> int:
             if local_v6:
                 _ok(f"WARP adapter IPv6: {local_v6}")
             else:
-                _warn("CloudflareWARP adapter IPv6 missing — switch to App-Only (Isolated) mode or check WARP TUN adapter")
+                _warn("CloudflareWARP adapter IPv6 missing - switch to App-Only (Isolated) mode or check WARP TUN adapter")
 
-    # 4. External egress check
+
     egress = get_egress_ip(timeout=8.0)
     if egress:
         if ":" in egress:
@@ -163,13 +161,13 @@ def main() -> int:
     else:
         _warn("no external egress check response (offline, tunnel still connecting, or proxy unavailable)")
 
-    # 5. Guard status
+
     if _is_mutex_held("OpencodeUnlimitedGuard"):
         _ok("zen-guard process: running")
     elif _task_exists(TASK_GUARD):
-        _bad(f"zen-guard down (task installed) — run: schtasks /Run /TN {TASK_GUARD}")
+        _bad(f"zen-guard down (task installed) - run: schtasks /Run /TN {TASK_GUARD}")
     else:
-        _bad("zen-guard not running & scheduled task missing — re-run install.ps1")
+        _bad("zen-guard not running & scheduled task missing - re-run install.ps1")
 
     if GUARD_STATE_FILE.is_file():
         try:
@@ -180,20 +178,20 @@ def main() -> int:
         except Exception as exc:
             print(f"       guard state unreadable: {exc}")
 
-    # 6. Firewall kill-switch (optional admin rule)
+
     if is_killswitch_installed():
         _ok("firewall kill-switch (OUC_LEAKGUARD_CLI): installed")
     else:
         _warn("firewall kill-switch not installed (proxy still fails closed via WARP IPv6 bind; run install.bat as Admin to add firewall rule)")
 
-    # 7. Real opencode binary + PATH shim check
+
     real_oc = find_opencode_cli()
     if real_oc:
         _ok(f"real opencode CLI: {real_oc}")
     else:
         _bad("real opencode CLI not found")
 
-    # 8. OpenCode Desktop / background service proxy integration
+
     svc_port = service_proxy_port()
     proxy_up = False
     try:
@@ -213,14 +211,14 @@ def main() -> int:
     if proxy_up and svc_proxied:
         _ok(f"OpenCode Desktop & background service -> WARP lane (127.0.0.1:{svc_port})")
     elif proxy_up:
-        _warn(f"service proxy listening on 127.0.0.1:{svc_port}, but service.json not wired — re-run install.bat")
+        _warn(f"service proxy listening on 127.0.0.1:{svc_port}, but service.json not wired - re-run install.bat")
     else:
-        _warn(f"Desktop/service proxy not listening on 127.0.0.1:{svc_port} — restart OpencodeUnlimited-Keeper")
+        _warn(f"Desktop/service proxy not listening on 127.0.0.1:{svc_port} - restart OpencodeUnlimited-Keeper")
 
     which_oc = shutil.which("opencode")
     expected_shim = str(BIN_DIR / "opencode.cmd").lower()
-    # The ZzZ Code shim sits ahead of this bin on PATH by design: `opencode` has
-    # to reach the rebranded runtime, not the vendor one. Both are correct.
+
+
     zzz_shim_dir = str(
         Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
         / "ZzZCode" / "cli"
@@ -231,9 +229,9 @@ def main() -> int:
     elif resolved_under_zzz:
         _ok(f"opencode on PATH -> ZzZ Code runtime ({which_oc})")
     elif which_oc:
-        _warn(f"opencode on PATH resolves to {which_oc} instead of {BIN_DIR / 'opencode.cmd'} — open a new terminal or move {BIN_DIR} earlier in PATH")
+        _warn(f"opencode on PATH resolves to {which_oc} instead of {BIN_DIR / 'opencode.cmd'} - open a new terminal or move {BIN_DIR} earlier in PATH")
     else:
-        _warn(f"opencode not on PATH — add {BIN_DIR} to User PATH")
+        _warn(f"opencode not on PATH - add {BIN_DIR} to User PATH")
 
     print("")
     print("  all [OK] = ready. run `opencode` from a fresh terminal.")

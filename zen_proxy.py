@@ -1,5 +1,3 @@
-"""Local HTTP/CONNECT proxy that routes through the selected egress route."""
-
 from __future__ import annotations
 
 import errno
@@ -39,8 +37,7 @@ PROXY_LOG_FILE = LANE_DIR / "proxy.log"
 PROXY_STATUS_FILE = LANE_DIR / "proxy_status.json"
 FALLBACK_FLAG = LANE_DIR / "fallback.flag"
 
-# Three quick attempts beat one long stall: OpenCode shows a network error long
-# before a 12-second connect timeout per address finishes.
+
 EDGE_CONNECT_TIMEOUT = 3.0
 EDGE_TRY_LIMIT = 3
 EDGE_FAILURE_COOLDOWN = 120.0
@@ -53,7 +50,7 @@ _LAST_STREAM_RESET_NOTE = 0.0
 _TUNNEL_LOCK = threading.Lock()
 _ACTIVE_TUNNELS = 0
 
-# Kinds that describe a failed route rather than a lifecycle note.
+
 ERROR_KINDS = {
     "error",
     "reset",
@@ -84,7 +81,6 @@ def _write_proxy_status(data: dict) -> None:
 
 
 def _record_event(kind: str, detail: str, host: str = "", edge: str = "") -> None:
-    """Keep a small, bounded trail of route failures for health checks and logs."""
     now = int(time.time())
     entry = {
         "ts": now,
@@ -122,7 +118,6 @@ def _record_event(kind: str, detail: str, host: str = "", edge: str = "") -> Non
 
 
 def _mark_fallback(host: str, reason: str) -> None:
-    """Record that a request left through the normal network instead of WARP."""
     global _LAST_FALLBACK_NOTE
     now = time.monotonic()
     if now - _LAST_FALLBACK_NOTE >= 30.0:
@@ -135,7 +130,6 @@ def _mark_fallback(host: str, reason: str) -> None:
 
 
 def _record_reset(host: str, detail: str) -> None:
-    """One line per ten seconds is enough; a dropped stream resets in bursts."""
     global _LAST_RESET_NOTE
     now = time.monotonic()
     with _RESET_LOCK:
@@ -146,7 +140,6 @@ def _record_reset(host: str, detail: str) -> None:
 
 
 def _record_stream_reset(host: str, detail: str, edge: str = "") -> None:
-    """Record a reset after response bytes started; those are visible to the user."""
     global _LAST_STREAM_RESET_NOTE
     now = time.monotonic()
     with _STREAM_RESET_LOCK:
@@ -182,7 +175,6 @@ def _clear_fallback() -> None:
 
 
 def proxy_status() -> dict:
-    """Return a compact snapshot for the dashboard and doctor."""
     with STATUS_LOCK:
         data = _read_proxy_status()
     now = time.time()
@@ -202,7 +194,6 @@ def proxy_status() -> dict:
 
 
 class _WarpState:
-    """Thread-safe cache for active WARP IPv6 and auto-rotated pinned edge."""
 
     def __init__(self, pool: list[str], initial_edge: str, ttl: float = 1.5) -> None:
         self._ttl = ttl
@@ -242,7 +233,6 @@ class _WarpState:
                 pass
 
     def poll_controls(self) -> None:
-        """Refresh edge override / reroll state immediately without waiting for traffic."""
         with self._lock:
             self._apply_edge_controls()
 
@@ -261,7 +251,6 @@ class _WarpState:
         return random.choice(choices) if choices else self._edge
 
     def edges_to_try(self) -> list[str]:
-        """Current edge first, then healthy alternatives instead of one long stall."""
         with self._lock:
             now = time.monotonic()
             bad = {
@@ -276,8 +265,8 @@ class _WarpState:
             else:
                 choices = [primary, *healthy]
             if not healthy:
-                # Every edge is cooling down: keep trying rather than failing
-                # outright, but still don't repeat the same address first.
+
+
                 choices = [e for e in self._pool if e != primary] or [primary]
             return choices[:EDGE_TRY_LIMIT]
 
@@ -307,11 +296,6 @@ class _WarpState:
             return self._edge
 
     def note_stream_reset(self, edge: str) -> str:
-        """Move away from an edge that keeps cutting live response streams.
-
-        A single reset can be the provider closing a finished stream, so the
-        edge is only retired after a second reset inside five minutes.
-        """
         if not edge:
             return ""
         now = time.monotonic()
@@ -337,7 +321,6 @@ class _WarpState:
             return replacement
 
     def invalidate(self) -> None:
-        """Drop the cached tunnel address after WARP reconnects."""
         with self._lock:
             self._ts = 0.0
             self._v6 = None
@@ -378,7 +361,7 @@ class _WarpState:
 
 
 class _ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    # SO_REUSEADDR on Windows lets a second process bind an active port.
+
     allow_reuse_address = sys.platform != "win32"
     daemon_threads = True
 
@@ -389,7 +372,6 @@ def _note_stream_reset(
     warp_state: _WarpState | None,
     edge: str,
 ) -> None:
-    """Report a mid-stream reset and retire a repeatedly failing pinned edge."""
     replacement = ""
     if warp_state is not None:
         replacement = warp_state.note_stream_reset(edge)
@@ -399,12 +381,6 @@ def _note_stream_reset(
 
 
 def _client_gone(sock: socket.socket, closed: set, seconds: float = 0.15) -> bool:
-    """Return True when the client already closed, including a pending EOF.
-
-    A reset after the client stopped reading is not a cut stream the user can
-    see. Waiting briefly for a pending EOF keeps completed responses from
-    being reported as failures when the server closes with RST.
-    """
     if sock in closed:
         return True
     try:
@@ -417,7 +393,6 @@ def _client_gone(sock: socket.socket, closed: set, seconds: float = 0.15) -> boo
 
 
 def _read_exact(stream, size: int) -> bytes:
-    """Read exactly ``size`` bytes from an unbuffered socket stream."""
     chunks: list[bytes] = []
     remaining = size
     while remaining > 0:
@@ -430,7 +405,6 @@ def _read_exact(stream, size: int) -> bytes:
 
 
 def _drain_client(sock: socket.socket, seconds: float = 0.25) -> None:
-    """Consume trailing client bytes so Windows closes with FIN instead of RST."""
     try:
         sock.setblocking(False)
         deadline = time.monotonic() + seconds
@@ -451,7 +425,6 @@ def _relay(
     warp_state: _WarpState | None = None,
     edge: str = "",
 ) -> None:
-    """Bidirectionally forward bytes between two sockets with TCP keepalive and resilient streaming."""
     sockets = [a, b]
     closed = set()
     seen_data = set()
@@ -460,10 +433,10 @@ def _relay(
             s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             if hasattr(socket, "TCP_NODELAY"):
                 s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            # Windows TCP keepalive parameters: idle 15s, interval 5s
+
             if hasattr(socket, "SIO_KEEPALIVE_VALS"):
                 s.ioctl(socket.SIO_KEEPALIVE_VALS, (1, 15000, 5000))
-            # Linux TCP keepalive parameters: idle 15s, interval 5s, 5 probes
+
             if hasattr(socket, "TCP_KEEPIDLE"):
                 s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 15)
             if hasattr(socket, "TCP_KEEPINTVL"):
@@ -480,7 +453,7 @@ def _relay(
             if exceptional:
                 break
             if not readable:
-                # Generous 15-minute idle ceiling for long-thinking models.
+
                 if time.monotonic() - last_active > 900.0:
                     break
                 continue
@@ -491,9 +464,8 @@ def _relay(
                 try:
                     data = src.recv(65536)
                 except (ConnectionResetError, ConnectionAbortedError) as exc:
-                    # Many servers end a completed response with a reset instead
-                    # of a clean FIN. A reset before the upstream sent anything
-                    # is a route failure; one after data started is a cut stream.
+
+
                     if src is b and src in seen_data:
                         if not _client_gone(a, closed):
                             _note_stream_reset(
@@ -506,7 +478,7 @@ def _relay(
                         _record_reset(host, f"{type(exc).__name__} before response")
                     data = b""
                 except OSError as exc:
-                    # Windows reports a peer reset as plain OSError/WSAECONNRESET.
+
                     winerror = getattr(exc, "winerror", None)
                     if src is b and src in seen_data:
                         if not _client_gone(a, closed):
@@ -527,9 +499,8 @@ def _relay(
                     try:
                         dst.sendall(data)
                     except (OSError, ConnectionResetError) as exc:
-                        # A failed write toward the client means the client went
-                        # away; only a write toward the upstream host says
-                        # anything about the route.
+
+
                         if not closed and dst is b:
                             if b in seen_data:
                                 _note_stream_reset(
@@ -545,7 +516,7 @@ def _relay(
                                 )
                         return
                 else:
-                    # EOF from src -> send TCP FIN to dst (half-close)
+
                     closed.add(src)
                     if src in sockets:
                         sockets.remove(src)
@@ -554,8 +525,8 @@ def _relay(
                     except OSError:
                         pass
                     if src is b:
-                        # The upstream cannot send anything else on this tunnel.
-                        # Drain the client briefly so Windows emits FIN, not RST.
+
+
                         _drain_client(a)
                         return
                     if len(closed) >= 2:
@@ -565,7 +536,6 @@ def _relay(
 
 
 def _open_pinned_v6(dest_ip: str, port: int, local_v6: str, timeout: float = 12.0) -> socket.socket:
-    """Open an IPv6 TCP socket explicitly bound to the WARP tunnel IPv6 address."""
     sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     try:
@@ -579,7 +549,6 @@ def _open_pinned_v6(dest_ip: str, port: int, local_v6: str, timeout: float = 12.
 
 
 def _local_address_stale(exc: OSError) -> bool:
-    """Return True when the bound WARP address disappeared mid-flight."""
     return getattr(exc, "winerror", None) == 10049 or exc.errno == errno.EADDRNOTAVAIL
 
 
@@ -588,12 +557,6 @@ def _open_pinned_any(
     port: int,
     warp_state: _WarpState,
 ) -> tuple[socket.socket, str]:
-    """Try the current pinned address, then a few alternatives, before declaring the route dead.
-
-    A WARP reconnect replaces the local IPv6 address. Binding the old one fails
-    on every edge, so refresh the cached address once instead of reporting the
-    whole route as dead.
-    """
     local_v6, _ = warp_state.get(wait_if_rotating=True)
     if not local_v6:
         raise ConnectionRefusedError("WARP tunnel has no IPv6 address")
@@ -629,7 +592,6 @@ def _open_pinned_any(
 
 
 def _active_warp_scope() -> str:
-    """Return the configured WARP scope, defaulting to the platform's safe mode."""
     default_scope = "tun" if sys.platform == "win32" else "isolated"
     try:
         from proxy_chain import get_egress_config
@@ -653,7 +615,7 @@ def _open_warp_direct(
         or clean_host.endswith(".opencode.com")
     )
 
-    # 1. Isolated (App-Only) mode: tunnel via local WARP SOCKS5 proxy (port 40000)
+
     if scope == "isolated":
         try:
             from tor_manager import open_socks5_tunnel
@@ -661,7 +623,7 @@ def _open_warp_direct(
         except Exception:
             pass
 
-    # 2. TUN mode or fallback: bind explicitly to the WARP adapter's IPv6
+
     if is_opencode_host:
         try:
             sock, _ = _open_pinned_any(clean_host, port, warp_state)
@@ -669,7 +631,7 @@ def _open_warp_direct(
         except Exception as exc:
             _record_event("connect_fail", f"pinned route failed: {exc}", clean_host)
 
-        # Try local WARP SOCKS5 if TUN socket bind failed
+
         try:
             from tor_manager import open_socks5_tunnel
             return open_socks5_tunnel(clean_host, port, socks_host="127.0.0.1", socks_port=40000, timeout=2.0)
@@ -685,14 +647,13 @@ def _open_warp_direct(
         except Exception:
             pass
 
-    # 3. Strict fail-closed privacy mode never silently uses Tor or a
-    #    different route; the caller performs a repair attempt and retries.
+
     if is_strict:
         raise ConnectionRefusedError(
             "Cloudflare WARP tunnel unavailable (fail-closed strict mode)"
         )
 
-    # 4. Resilient failover: if WARP is down, try an active Tor client.
+
     try:
         from tor_manager import get_active_tor_target, open_socks5_tunnel
         tor_target = get_active_tor_target()
@@ -710,7 +671,7 @@ def _open_warp_direct(
     except Exception:
         pass
 
-    # 5. Direct fallback keeps OpenCode usable when the tunnel drops.
+
     if is_opencode_host:
         try:
             _, pinned_edge = warp_state.get(wait_if_rotating=False)
@@ -723,8 +684,7 @@ def _open_warp_direct(
         except Exception:
             pass
 
-    # Direct standard dual-stack connection (IPv4/IPv6). This silently leaves
-    # the WARP IPv6 route, so record it instead of changing the route unseen.
+
     if is_opencode_host:
         _mark_fallback(
             clean_host,
@@ -747,11 +707,6 @@ def _strict_mode() -> bool:
 
 
 def _repair_warp_tunnel(warp_state: _WarpState) -> bool:
-    """Reconnect a dropped WARP tunnel, at most once per interval.
-
-    Only runs when the route is actually down; reconnecting a healthy tunnel
-    resets its pin and can cause the drops this function exists to repair.
-    """
     global _LAST_REPAIR
     try:
         from proxy_chain import get_egress_config
@@ -821,7 +776,6 @@ def _open_upstream(
     port: int,
     warp_state: _WarpState,
 ) -> socket.socket:
-    """Connect upstream through the active WARP, Tor, or custom route."""
     clean_host = host.strip("[]").lower()
     if clean_host in ("127.0.0.1", "localhost", "::1"):
         sock = socket.create_connection((clean_host, port), timeout=10.0)
@@ -858,12 +812,6 @@ def _connect_upstream(
     port: int,
     warp_state: _WarpState,
 ) -> socket.socket:
-    """Open the configured route, retrying once before repairing WARP.
-
-    Reconnecting the tunnel is destructive to every live response stream, so
-    it is deferred while another tunnel is active. The failed connection still
-    gets one quick retry, which covers brief edge hiccups.
-    """
     try:
         return _open_upstream(host, port, warp_state)
     except Exception as first:
@@ -880,9 +828,8 @@ def _connect_upstream(
 
 def _make_handler(warp_state: _WarpState):
     class ProxyHandler(socketserver.StreamRequestHandler):
-        # StreamRequestHandler defaults to a buffered rfile. That can swallow
-        # the first TLS bytes after CONNECT headers and leaves the tunnel
-        # waiting forever. Header reads are tiny, so unbuffered is safer.
+
+
         rbufsize = 0
         wbufsize = 0
         disable_nagle_algorithm = True
@@ -934,7 +881,7 @@ def _make_handler(warp_state: _WarpState):
                         _record_event("error", f"CONNECT {host}:{port}: {exc}", host)
                         self._send_err(503, "Service Unavailable", f"Strict mode blocked the route to {host}:{port}. {exc}")
                         return
-                    # Direct fallback keeps OpenCode usable when the route drops.
+
                     try:
                         upstream = socket.create_connection((host, port), timeout=8.0)
                         upstream.settimeout(None)
@@ -974,7 +921,7 @@ def _make_handler(warp_state: _WarpState):
                     _record_event("error", f"HTTP {host}:{port}: {exc}", host)
                     self._send_err(503, "Service Unavailable", f"Strict mode blocked the route to {host}:{port}. {exc}")
                     return
-                # Direct fallback keeps OpenCode usable when the route drops.
+
                 try:
                     upstream = socket.create_connection((host, port), timeout=8.0)
                     upstream.settimeout(None)
@@ -1024,13 +971,10 @@ def _make_handler(warp_state: _WarpState):
 
 
 def start_proxy_server(port: int = 0) -> tuple[_ThreadedTCPServer, int, str]:
-    """Start the local CONNECT proxy in a background thread and return (server, port, edge)."""
     pinned_edge = os.environ.get("OUC_PIN_EDGE", "").strip()
     scope = _active_warp_scope()
 
-    # Isolated mode forwards through WARP's local SOCKS proxy; pinned IPv6 edge
-    # discovery is only needed for a direct TUN route. Skipping it removes
-    # several DNS timeouts from every Linux launch.
+
     if scope == "isolated" and not pinned_edge:
         pool: list[str] = []
         chosen_edge = ""
@@ -1074,7 +1018,6 @@ def start_proxy_server(port: int = 0) -> tuple[_ThreadedTCPServer, int, str]:
 
 
 def _write_port_file(path: str, port: int) -> None:
-    """Publish the bound port so a launcher can attach without guessing."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".tmp")

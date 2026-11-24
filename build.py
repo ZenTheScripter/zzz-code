@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-"""Build the standalone ZzZ Code launcher with PyInstaller.
-
-The spec next to this file resolves every path relative to itself, so the only
-job here is to pick the build directory, pass the one-dir switch through, and
-explain the common failure (PyInstaller missing) in one line.
-
-    python build.py
-    python build.py --clean
-    python build.py --onedir
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -33,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        import PyInstaller  # noqa: F401
+        import PyInstaller
     except ImportError:
         print("pyinstaller is not installed - run: python -m pip install pyinstaller",
               file=sys.stderr)

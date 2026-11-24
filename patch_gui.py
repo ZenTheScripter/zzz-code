@@ -1,55 +1,3 @@
-#!/usr/bin/env python3
-"""Add the `Abliterated` switch and the `ZzZ Code` settings tab to OpenCode Desktop.
-
-The renderer is a Vite bundle inside `app.asar`; the composer toolbar is built
-from `[data-slot=composer-controls]` and the reasoning-level chip sits in the
-inner flex row. The control this module adds is a DOM node, so the bundle has to
-grow - unlike the wordmark work in `patch_desktop.py`, this is not a
-length-preserving splice.
-
-Nothing is rewritten in place. The asar header is re-serialised and the data
-section is carried over verbatim:
-
-    * two members are (re)written at the end of the data section
-      (`out/renderer/index.html` gains a script tag, `out/renderer/assets/
-      zzz-gui.js` is the payload)
-    * every untouched member keeps its original offset, because offsets are
-      relative to the start of the data section and that block never moves
-    * the three header words are recomputed from the new JSON length
-
-The toggle is a real `<label data-component=switch>`, so it inherits the app's
-own switch styling - `--v2-background-bg-accent` when on, layer-04 when off,
-`--v2-text-text-muted` for the label - and flips with the light/dark theme
-without a second stylesheet. State lives in `localStorage["zzzcode.abliterated"]`
-and mirrors onto `<html data-zzz-abliterated>`, so other hooks can read it.
-
-Two vendor details shape the payload:
-
-    * the bundled switch rules reach specificity `0,5,0` - the hover rule is
-      `:hover:not([data-disabled],[data-readonly]) [data-slot=switch-thumb]` -
-      so a scoped rule cannot keep the knob round. Geometry is declared
-      `!important` and reinforced inline by `setThumb()`, which is the only
-      declaration level those selectors cannot outrank.
-    * the label type is *borrowed* from the composer's model chip at runtime
-      through `getComputedStyle` longhands, not hardcoded, so it follows the
-      app's own type token and cannot drift when the app restyles.
-
-The settings tab is injected into the shell's real contract, read out of the
-bundle: `aside.settings-sidebar > .settings-nav > .settings-nav-groups >
-.settings-nav-group` holds one `[data-slot=tabs-v2-trigger-wrapper]` per tab,
-selection paints through `:has([data-selected])`, and panels are
-`.settings-content > .settings-panel` toggled by the `hidden` attribute. The tab
-is appended to the last group and its panel rebuilt whenever the shell re-renders
-while the tab is selected. It carries a single action, `Jailbreak All Opened
-Folders`, which posts to the launcher's loopback bridge.
-
-     python patch_gui.py --check
-     python patch_gui.py
-
-Undo is `python patch_desktop.py --restore`, which copies the pristine bundle
-back over both patches.
-"""
-
 from __future__ import annotations
 
 import json
@@ -68,12 +16,7 @@ SHARE_MEMBER = "/out/renderer/assets/social-share-zzz.png"
 ICON_SVG_MEMBER = "/out/renderer/assets/favicon-zzz.svg"
 ICON_PNG_MEMBER = "/out/renderer/assets/favicon-zzz-96.png"
 
-# ---------------------------------------------------------------- renderer payload
-#
-# Loaded as a classic script so it does not need module/CORS plumbing. It waits
-# for the composer row, appends the switch, and re-appends it whenever Solid
-# replaces the subtree; the switch is idempotent because it is keyed by
-# `data-slot`. Comments stay out of the payload: it ships to the page verbatim.
+
 GUI_JS = r"""(function () {
   "use strict";
   var KEY = "zzzcode.abliterated";
@@ -81,11 +24,6 @@ GUI_JS = r"""(function () {
   var HOST = '[data-slot="composer-controls"] > div';
   var ROOT = document.documentElement;
 
-  // The launcher owns the actual injection: it merges the instruction entries
-  // into `~/.config/opencode/opencode.json` for the session. The renderer cannot
-  // touch files, so the switch talks to the launcher's loopback bridge. Port is
-  // fixed and the bridge is only up while a ZzZ desktop session runs; every call
-  // is best-effort, so a dead bridge leaves the switch usable.
   var BRIDGE = "http://127.0.0.1:47654";
   var STATE = BRIDGE + "/state";
   var JAILBREAK = BRIDGE + "/jailbreak";
@@ -108,9 +46,6 @@ GUI_JS = r"""(function () {
   var TEMPLATE_SAVE = BRIDGE + "/templates/save";
   var THEME_KEY = "zzz.theme.id";
 
-  // Small shared surfaces. A toast is one reused node so spamming an action never
-  // stacks pills up the screen; the clipboard helper falls back to a hidden
-  // textarea because `navigator.clipboard` is undefined on a non-secure origin.
   function toast(text) {
     var node = document.querySelector("[data-zzz-toast]");
     if (!node) {
@@ -157,16 +92,6 @@ GUI_JS = r"""(function () {
     }
   }
 
-  // The vendor switch is `[data-component=switch]` with a 24x16 track and a
-  // 12px square thumb (border-radius:2px, 3px on hover, translate(8px) when
-  // checked). Those selectors reach 0,5,0 - `:hover:not([data-disabled],
-  // [data-readonly]) [data-slot=switch-thumb]` - so a plain scoped rule cannot
-  // beat them and the knob visibly squares off on click. The geometry below is
-  // declared `!important` and the thumb also carries inline `!important`
-  // geometry (see setThumb), which outranks every stylesheet.
-  //
-  // Geometry: 36x20 track, 1px border + 2px padding either side leaves a 30px
-  // inner lane, so a 14px knob travels 16px between the two rests.
   var STYLE = [
     'html [data-slot="' + SLOT + '"]{gap:7px;padding:0 2px;margin-inline-start:4px}',
     'html [data-slot="' + SLOT + '"] [data-slot=switch-label]{white-space:nowrap;opacity:1}',
@@ -243,8 +168,6 @@ GUI_JS = r"""(function () {
     'html [data-zzz-actions]{display:flex;justify-content:flex-end;gap:8px}'
   ].join("");
 
-  // Longhands only: Chromium does not round-trip the `font` shorthand through
-  // getComputedStyle, so the chip's type is copied property by property.
   var TYPE_PROPS = [
     "font-family",
     "font-size",
@@ -288,8 +211,6 @@ GUI_JS = r"""(function () {
     }
   }
 
-  // Inline `!important` geometry is the only thing the vendor's hover and
-  // checked rules cannot outrank, so the knob stays a circle on every state.
   function setThumb(thumb, on) {
     thumb.style.setProperty("box-sizing", "border-box", "important");
     thumb.style.setProperty("width", "14px", "important");
@@ -308,9 +229,6 @@ GUI_JS = r"""(function () {
     thumb.style.setProperty("transition", "transform 140ms ease,background 140ms ease", "important");
   }
 
-  // Typography is borrowed from the composer's model chip rather than hardcoded:
-  // the chip carries the app's own type token, so the label matches it exactly in
-  // every theme without this payload knowing the token's name.
   function chipCandidate() {
     var row = document.querySelector(HOST);
     if (!row) return null;
@@ -362,8 +280,6 @@ GUI_JS = r"""(function () {
     }
   }
 
-  // Push the switch state at the launcher; it applies or drops the instruction
-  // entries. A rejected promise is the normal case when the CLI console is gone.
   function tellLauncher() {
     try {
       window
@@ -379,8 +295,6 @@ GUI_JS = r"""(function () {
     }
   }
 
-  // The launcher is the source of truth at load: a session started with the feed
-  // on shows the switch on, even in a fresh renderer with empty localStorage.
   function askLauncher() {
     try {
       window
@@ -449,22 +363,6 @@ GUI_JS = r"""(function () {
     return root;
   }
 
-  // ------------------------------------------------------------ settings tab
-  //
-  // The settings shell is a `tabs-v2` list: `aside.settings-sidebar >
-  // .settings-nav > .settings-nav-groups > .settings-nav-group`, one
-  // `[data-slot=tabs-v2-trigger-wrapper]` per tab, and the selected tab paints
-  // through `.settings-nav-groups [data-slot=tabs-v2-trigger-wrapper]:has(
-  // [data-selected])`.
-  //
-  // `.settings-nav-groups` is a Solid `For` list: every selection change re-runs
-  // it, and a node appended inside it is destroyed on the next run. Destroying
-  // the node between mousedown and mouseup kills the click, which is exactly why
-  // the old in-group entries looked dead. So the entries live in our own
-  // `[data-zzz-nav]` block under `.settings-nav` (outside the reconciled list,
-  // static child of the sidebar), and the panels live in a `[data-zzz-sheet]`
-  // overlay we own, sized to `.settings-content`. Vendor panels are never hidden
-  // or mutated: closing the sheet simply reveals whatever the shell had.
 
   function settingsHost() {
     var content = document.querySelector(".settings-content");
@@ -488,8 +386,6 @@ GUI_JS = r"""(function () {
     caption.setAttribute("data-zzz-nav-label", "");
     caption.textContent = "ZzZ Code";
     block.appendChild(caption);
-    // Appended after the vendor groups, never inside them: `.settings-nav` has a
-    // static child list, so nothing re-runs a `For` over our row.
     host.nav.appendChild(block);
     return block;
   }
@@ -522,11 +418,6 @@ GUI_JS = r"""(function () {
   ];
 
   function buildTab(tab) {
-    // Vendor contract, copied from the shell's `tabs-v2` trigger: wrapper div
-    // with `data-value`, a `role=tab` button carrying `data-key` and
-    // `data-selected`, and one `[data-slot=tabs-v2-trigger-content]` span that
-    // owns the flex layout. Anything less and the row does not inherit the
-    // group's 28px metrics.
     var wrap = document.createElement("div");
     wrap.setAttribute("data-slot", "tabs-v2-trigger-wrapper");
     wrap.setAttribute("data-value", tab.id);
@@ -551,10 +442,6 @@ GUI_JS = r"""(function () {
     content.appendChild(label);
 
     button.appendChild(content);
-    // Activation rides `pointerdown`, not `click`: a click needs the node to
-    // survive mousedown -> mouseup, and a shell re-render in that window is the
-    // one thing that used to eat the press. `click` stays wired for keyboard
-    // activation, and `activateTab` no-ops on the id that is already open.
     wrap.addEventListener("pointerdown", function (event) {
       if (event.button !== 0) return;
       event.preventDefault();
@@ -642,10 +529,6 @@ GUI_JS = r"""(function () {
     return button;
   }
 
-  // Same vendor switch contract as the composer knob: a real
-  // `[data-component=switch]` label so the app's own focus and hover states
-  // apply, with the track geometry declared in STYLE and the thumb geometry set
-  // inline `!important` (see setThumb) so it stays a circle on every state.
   function makeSwitch(checked, onChange) {
     var root = document.createElement("label");
     root.setAttribute("data-component", "switch");
@@ -799,7 +682,6 @@ GUI_JS = r"""(function () {
 
     body.appendChild(ups);
 
-    // -------------------------------------------------------- diagnostics
     var diag = makeSection("Diagnostics");
     var diagStatus = document.createElement("div");
     diagStatus.setAttribute("data-zzz-status", "");
@@ -827,7 +709,6 @@ GUI_JS = r"""(function () {
         });
     }
 
-    // Flat `key: value` lines, because the reader is a bug report, not a parser.
     function formatDiag(data) {
       var lines = ["ZzZ Code diagnostics", ""];
       if (!data) {
@@ -900,7 +781,6 @@ GUI_JS = r"""(function () {
 
     body.appendChild(diag);
 
-    // ------------------------------------------------------------- runtime
     var runtime = makeSection("Runtime");
     var runStatus = document.createElement("div");
     runStatus.setAttribute("data-zzz-status", "");
@@ -949,7 +829,6 @@ GUI_JS = r"""(function () {
     runtime.appendChild(runStatus);
     body.appendChild(runtime);
 
-    // ----------------------------------------------------------- templates
     var tpl = makeSection("Templates");
     var tplStatus = document.createElement("div");
     tplStatus.setAttribute("data-zzz-status", "");
@@ -1024,7 +903,6 @@ GUI_JS = r"""(function () {
 
     body.appendChild(tpl);
 
-    // ------------------------------------------------------------- footer
     var banner = document.createElement("a");
     banner.setAttribute("data-zzz-banner", "");
     banner.setAttribute("href", "https://discord.gg/pQBDchXTdp");
@@ -1108,17 +986,10 @@ GUI_JS = r"""(function () {
     }
   }
 
-  // ---------------------------------------------------------------- themes
 
   var themed = [];
   var THEME_STYLE_ID = "zzz-theme-overrides";
 
-  // The shell writes `--v2-*` on `<html data-color-scheme>` from a stylesheet
-  // rule, and it rewrites that attribute on every scheme change. Inline
-  // properties on the same element would lose to a later rule pass, so the
-  // overrides go into one `!important` sheet in `<head>`: it outlives every
-  // Solid re-render and every scheme flip, and clearing it restores the vendor
-  // palette exactly.
   function themeStyleNode() {
     var node = document.getElementById(THEME_STYLE_ID);
     if (!node) {
@@ -1151,10 +1022,6 @@ GUI_JS = r"""(function () {
     }
     if (kind === "light" || kind === "dark") css += "color-scheme:" + kind + " !important;";
     css += "}";
-    // A wallpaper is a gradient string, never an image file: the vendor CSP and
-    // the theme loader both stay happy, and there is nothing to fetch. It goes on
-    // a fixed layer above the shell so it reads on every panel, under the dialogs
-    // (`2147483000`) and toasts, and never eats a click.
     var wash = "";
     if (wall) {
       var clean = String(wall).replace(/[;{}<>\n\r"]/g, "").trim();
@@ -1171,9 +1038,6 @@ GUI_JS = r"""(function () {
     else ROOT.removeAttribute("data-zzz-theme-painted");
   }
 
-  // Reload restore. The bridge keeps the applied id, so the first paint after a
-  // window reload re-applies it before the settings page is ever opened; the
-  // saved localStorage id is only a hint for the panel's own ordering.
   function restoreTheme() {
     try {
       fetch(THEMES, { cache: "no-store" })
@@ -1273,8 +1137,6 @@ GUI_JS = r"""(function () {
     tools.appendChild(clear);
     bar.appendChild(tools);
 
-    // Search is a plain substring match over name and author, and it re-renders
-    // from the cached list, so typing never re-hits the bridge.
     var search = document.createElement("input");
     search.type = "search";
     search.setAttribute("data-zzz-search", "");
@@ -1481,10 +1343,6 @@ GUI_JS = r"""(function () {
     }
   }
 
-  // The vendor row paints through `:has([data-selected])`. Our sheet paints its
-  // own row, and leaving two lit rows reads as "two tabs at once", so the live
-  // vendor selection is parked in `data-zzz-vendor-selected` and put back when
-  // the sheet closes. Nothing else about the vendor DOM is touched.
 
   function clearVendorSelection(host) {
     if (!host || !host.groups) return;
@@ -1502,8 +1360,6 @@ GUI_JS = r"""(function () {
     if (!host || !host.groups) return;
     var marked = host.groups.querySelectorAll("[data-zzz-vendor-selected]");
     if (!marked.length) return;
-    // If the shell has already painted a choice of its own, the parked marker is
-    // stale: drop it and leave the fresh paint alone.
     var painted = host.groups.querySelector('[data-slot="tabs-v2-trigger"][data-selected]');
     for (var i = 0; i < marked.length; i += 1) {
       marked[i].removeAttribute("data-zzz-vendor-selected");
@@ -1519,9 +1375,6 @@ GUI_JS = r"""(function () {
   var sheetState = { id: "" };
 
   function sheetNode() {
-    // `div[data-zzz-sheet]`, never the bare attribute: `<html>` carries the
-    // `data-zzz-sheet-open` flag while a sheet is up, and a bare selector would
-    // grab the document element and style the page instead of the overlay.
     var sheet = document.querySelector("div[data-zzz-sheet]");
     if (sheet) return sheet;
     sheet = document.createElement("div");
@@ -1530,9 +1383,6 @@ GUI_JS = r"""(function () {
     return sheet;
   }
 
-  // The sheet is a sibling overlay pinned to the measured content box. Measuring
-  // beats `position:absolute` here because the shell centres a max-width column
-  // and the sidebar can collapse; the rect is the only honest answer.
   function placeSheet() {
     var host = settingsHost();
     if (!host) return null;
@@ -1599,9 +1449,6 @@ GUI_JS = r"""(function () {
   function bindNav(host) {
     if (host.nav.getAttribute("data-zzz-bound") === "1") return;
     host.nav.setAttribute("data-zzz-bound", "1");
-    // Capture phase: the shell's own row is about to paint a vendor panel under
-    // the sheet, so the sheet steps aside first and the parked selection comes
-    // back if nothing new was chosen.
     host.nav.addEventListener(
       "pointerdown",
       function (event) {
@@ -1628,8 +1475,6 @@ GUI_JS = r"""(function () {
       }
     }
     if (!sheetState.id) return;
-    // A re-render can drop the sheet panel while the id stays selected; rebuild
-    // in place and re-measure so the overlay keeps covering the content column.
     var sheet = placeSheet();
     if (!sheet || !sheet.querySelector('[data-zzz-owner="' + sheetState.id + '"]')) {
       var keep = sheetState.id;
@@ -1641,19 +1486,9 @@ GUI_JS = r"""(function () {
     markNav(sheetState.id);
   }
 
-  // ------------------------------------------------------------ update pill
-  //
-  // Our own surface, deliberately separate from the vendor's update button: the
-  // pill only exists while the launcher reports an update and updates are on.
-  // With two updates pending it fuses into one pill and opens a chooser.
 
   var VERSION = "1.1.0";
 
-  // Stock OpenCode parks its update button in the titlebar's right slot:
-  // `header[data-slot=titlebar-v2]` holds a flex row, and the right-most child is
-  // `div.relative.z-20...justify-end` containing `[data-slot=titlebar-update]`.
-  // Our pill joins that same row, so it lands where the stock control lives and
-  // never drifts over the window buttons.
   function titlebarHost() {
     var update = document.querySelector('[data-slot="titlebar-update"]');
     if (update && update.parentElement) return update.parentElement;
@@ -1670,8 +1505,6 @@ GUI_JS = r"""(function () {
   function keepPillHome(node) {
     var host = titlebarHost();
     if (!host) {
-      // Titlebar not mounted yet (or a themed shell without one): float it at the
-      // stock offset rather than dropping it, and retry on the next pass.
       if (!node.hasAttribute("data-fixed")) {
         node.setAttribute("data-fixed", "");
         (document.body || ROOT).appendChild(node);
@@ -1680,11 +1513,6 @@ GUI_JS = r"""(function () {
     }
     if (node.hasAttribute("data-fixed")) node.removeAttribute("data-fixed");
 
-    // The row is `[ ... ][titlebar-update][window controls]` and it is laid out
-    // left to right, so "in the row" is not enough: appending puts the pill to
-    // the right of the minimise/close buttons. The pill is spliced in directly
-    // after the stock update slot, or, when the vendor has no update control, in
-    // front of the window buttons. Both put it where the stock control lives.
     var slot = host.querySelector('[data-slot="titlebar-update"]');
     var anchor = null;
     if (slot && slot.parentElement === host) {
@@ -1730,7 +1558,7 @@ GUI_JS = r"""(function () {
     node.textContent = "";
     var dot = document.createElement("i");
     node.appendChild(dot);
-    var text = zzzUp && ocUp ? "2 updates" : zzzUp ? "ZzZ Code update" : "OpenCode update";
+    var text = zzzUp && ocUp ? "2 updates" : zzzUp ? "ZzZ Code " + status.zzz.available : "OpenCode update";
     node.appendChild(document.createTextNode(text));
   }
 
@@ -1896,16 +1724,10 @@ GUI_JS = r"""(function () {
   function schedule() {
     if (queued) return;
     queued = true;
-    // rAF is the cheap path, but a backgrounded window does not paint frames and
-    // the shell's DOM keeps changing there (settings panels mount lazily). The
-    // timer is the floor: whichever fires first clears `queued`.
     window.requestAnimationFrame(mountSoon);
     window.setTimeout(mountSoon, 120);
   }
 
-  // The chip and the settings shell both arrive after first paint (lazy panels,
-  // model list fetch), so the type adoption and the tab are re-attempted on a
-  // short ladder instead of relying on the observer's first pass alone.
   function reattempt() {
     var delays = [0, 120, 400, 1200, 2600];
     for (var i = 0; i < delays.length; i += 1) {
@@ -1941,8 +1763,6 @@ GUI_JS = r"""(function () {
           }
           return;
         }
-        // Ctrl/Cmd+Shift+Z opens the ZzZ Code sheet from anywhere in the window,
-        // and again closes it, which is quicker than walking the sidebar.
         if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {
           var key = String(event.key || "").toLowerCase();
           if (key !== "z") return;
@@ -1985,30 +1805,13 @@ GUI_JS = r"""(function () {
 """.encode("utf-8")
 
 
-# -------------------------------------------------------------------- rebrand
-#
-# Three surfaces, one brand: the renderer copy, the pre-load page, and the art
-# the app ships as files. The copy pass rewrites values a person reads and
-# leaves every identifier alone: vendor service names (`OpenCode Go`,
-# `OpenCode Console`, `OpenCode Free`, `OpenCode Beta`, `OpenCode Stable`), the
-# capability header, and links into the vendor docs still name things that are
-# genuinely the vendor's, so they stay exactly as shipped.
-
 BRAND = b"ZzZ Code"
 VENDOR_NAME = b"OpenCode"
-# Newer vendor builds title themselves "Opencode Unlimited". Both spellings are
-# the app's own name, so the copy pass sweeps the longer one first.
+
+
 VENDOR_NAMES = (b"Opencode Unlimited", b"OpenCode Unlimited", b"OpenCode")
 
-# Whole-value rewrites that carry the disclaimer. Each pair is (shipped, ours);
-# a missing first literal just means the vendor moved on, so the pair is skipped
-# rather than raising.
-#
-# These are `str`, not `bytes`: Python bytes literals cannot hold non-ASCII, and
-# every colophon literal carries a typographic character (’ · ©). Written as
-# bytes they would be a literal backslash sequence that never matches the asar,
-# which is exactly the silent no-op these pairs used to be. `rebrand_values`
-# encodes both sides on the way in.
+
 COPY_PAIRS = (
     (
         "`OpenCode, the open source coding agent`",
@@ -2022,11 +1825,8 @@ COPY_PAIRS = (
         "`OpenCode includes the following open source software.`",
         "`ZzZ Code includes the following open source software.`",
     ),
-    # The colophon. The first five are English-locale only, so the swap lands on
-    # the string a reader actually sees and the other 60-odd locales keep their
-    # own translation untouched. The website and the copyright line are shared by
-    # every locale, so those two do move everywhere - which is intended: the
-    # bundle is ours, and a vendor address in a fork is a dead link.
+
+
     (
         "`AI can\u2019t build great software, without you`",
         "`ZzZ Code \u00b7 a research build maintained by ZenZenitoZeno`",
@@ -2061,8 +1861,7 @@ COPY_PAIRS = (
     ),
 )
 
-# A hit is kept when one of these sits next to it. Every entry names the vendor,
-# a vendor service, or a protocol field rather than this app.
+
 COPY_KEEP = (
     b"X-OpenCode-",
     b"OpenCode:()=>",
@@ -2079,9 +1878,8 @@ COPY_KEEP = (
     b"https://opencode",
     b"onboarding.",
     b"error.installOpencode",
-    # Our own disclaimer text names the vendor on purpose. Without these the
-    # second pass eats its own tail: "a modified build of OpenCode" would come
-    # back as "a modified build of ZzZ Code" the next time the bundle is written.
+
+
     b"modified OpenCode build",
     b"modified build of OpenCode",
 )
@@ -2090,7 +1888,6 @@ COPY_WINDOW = 28
 
 
 def rebrand_copy(body: bytes) -> bytes:
-    """Swap the display name in place, leaving vendor names untouched."""
     out = bytearray(body)
     for name in VENDOR_NAMES:
         width = len(name)
@@ -2120,9 +1917,8 @@ TITLE_TAG = b"<title data-sm>ZzZ Code</title>"
 
 
 def rewrite_page(page: bytes) -> bytes:
-    """Pre-load page: title, icons, share image, disclaimer, payload tag."""
-    # The vendor renames itself between builds ("OpenCode", "Opencode Unlimited"),
-    # so the title is matched by shape: any single <title> tag becomes ours.
+
+
     page = re.sub(
         rb"<title[^>]*>[^<]*</title>", TITLE_TAG, page, count=1
     )
@@ -2145,21 +1941,15 @@ def rewrite_page(page: bytes) -> bytes:
     return page
 
 
-# ---------------------------------------------------------------- brand art
-#
-# Pure-python PNG so the build has no image dependency. Cells come from the same
-# 4x5 bitmaps the wordmark patch uses, so the files and the in-app art match.
-
 INK = (0x0B, 0x0B, 0x0F, 255)
 ACCENT = (0x35, 0xE0, 0xB0, 255)
 DIM = (0x1C, 0x1F, 0x2B, 255)
 
 
 def _png(width: int, height: int, shade) -> bytes:
-    """Encode RGB pixels. `shade(x, y)` returns an (r, g, b, a) tuple."""
     raw = bytearray()
     for y in range(height):
-        raw.append(0)  # filter: none
+        raw.append(0)
         for x in range(width):
             raw.extend(shade(x, y))
 
@@ -2181,7 +1971,6 @@ def _png(width: int, height: int, shade) -> bytes:
 
 
 def _stamp(word: str, scale: int, gap: int, origin_x: int, origin_y: int):
-    """Filled cells for `word` as (x, y) top-left pixels, plus the art bounds."""
     cells = set()
     cursor = origin_x
     for letter in word:
@@ -2250,16 +2039,7 @@ ICON_SVG = (
 ).encode("utf-8")
 
 
-# ------------------------------------------------------------------- asar writer
-
-
 class Archive:
-    """An asar image held as `index` + `blob`, rebuilt on demand.
-
-    Existing members are never moved and never rewritten; a member that changes
-    is appended to the tail of the blob and its header entry repointed, which
-    keeps this cheap on a 240 MB bundle and keeps untouched bytes byte-identical.
-    """
 
     def __init__(self, data: bytes):
         json_len = struct.unpack("<I", data[12:16])[0]
@@ -2292,9 +2072,8 @@ class Archive:
         entry = files.setdefault(name, {})
         entry["offset"] = str(len(self.blob))
         entry["size"] = len(payload)
-        # The vendor block hashes describe the shipped bytes; a rewritten or
-        # added member has no valid hash, so the field is dropped rather than
-        # left stale.
+
+
         entry.pop("integrity", None)
         self.blob.extend(payload)
 
@@ -2313,9 +2092,6 @@ class Archive:
                 bytes(self.blob),
             )
         )
-
-
-# ------------------------------------------------------------------- lifecycle
 
 
 def gui_state() -> dict:
@@ -2346,7 +2122,6 @@ def gui_state() -> dict:
 
 
 def renderer_member(archive: "Archive") -> str:
-    """The hashed bundle name is derived from the shipped page, never assumed."""
     page = archive.body(INDEX_MEMBER).decode("utf-8", "replace")
     at = page.find('src="./assets/')
     if at < 0:
@@ -2357,12 +2132,11 @@ def renderer_member(archive: "Archive") -> str:
 
 
 def apply() -> tuple[bool, str]:
-    """Write the payload, the rebrand and the art into the installed bundle."""
     if not ASAR.is_file():
         return False, "desktop bundle not installed"
     if not BACKUP.is_file():
-        # The backup is the only undo. Without it a repacked bundle could not be
-        # rolled back, so the wordmark pass has to run first.
+
+
         return False, "no pristine backup - apply the wordmark patch first"
     try:
         archive = Archive(ASAR.read_bytes())
@@ -2382,8 +2156,8 @@ def apply() -> tuple[bool, str]:
 
         bundle = renderer_member(archive)
         body = archive.body(bundle)
-        # Pairs run first: each one matches the vendor's exact shipped literal,
-        # and the copy pass behind them would have already renamed the subject.
+
+
         branded = rebrand_copy(rebrand_values(body))
         if branded != body:
             archive.write(bundle, branded)

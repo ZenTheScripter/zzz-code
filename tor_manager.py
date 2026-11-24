@@ -1,5 +1,3 @@
-"""Tor portable manager and SOCKS5 client for OpenCode Unlimited."""
-
 from __future__ import annotations
 
 import json
@@ -30,7 +28,6 @@ DETACHED_PROCESS = 0x00000008
 
 
 def is_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.8) -> bool:
-    """Check whether a local TCP port is answering."""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -39,7 +36,6 @@ def is_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.8) -> bo
 
 
 def test_socks5_alive(port: int, host: str = "127.0.0.1", timeout: float = 1.2) -> bool:
-    """Verify that a given port responds to a standard SOCKS5 handshake."""
     try:
         with socket.create_connection((host, port), timeout=timeout) as s:
             s.sendall(b"\x05\x01\x00")
@@ -50,7 +46,6 @@ def test_socks5_alive(port: int, host: str = "127.0.0.1", timeout: float = 1.2) 
 
 
 def find_tor_exe() -> Path | None:
-    """Locate portable or installed tor.exe across system and portable paths."""
     candidates = [
         TOR_DIR / "tor" / "tor.exe",
         TOR_DIR / "Tor" / "tor.exe",
@@ -65,12 +60,12 @@ def find_tor_exe() -> Path | None:
         if c.is_file():
             return c
 
-    # System PATH lookup
+
     system_tor = shutil.which("tor.exe") or shutil.which("tor")
     if system_tor and os.path.isfile(system_tor):
         return Path(system_tor)
 
-    # Recursive search if unzipped in custom subfolder
+
     if TOR_DIR.is_dir():
         for p in TOR_DIR.rglob("tor.exe"):
             if p.is_file():
@@ -79,8 +74,7 @@ def find_tor_exe() -> Path | None:
 
 
 def get_active_tor_target() -> tuple[str, int] | None:
-    """Return (host, port) of the first live Tor SOCKS service (portable, Tor Browser, or daemon)."""
-    # Prefer Tor Browser if user already has it running
+
     for p in (TOR_BROWSER_SOCKS_PORT, TOR_DEFAULT_SOCKS_PORT):
         if test_socks5_alive(p):
             return ("127.0.0.1", p)
@@ -88,7 +82,6 @@ def get_active_tor_target() -> tuple[str, int] | None:
 
 
 def fetch_tor_bundle_url() -> list[str]:
-    """Get list of mirror download URLs for Tor Expert Bundle."""
     urls = []
     api_url = "https://aus1.torproject.org/torbrowser/update_3/release/downloads.json"
     req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
@@ -112,7 +105,6 @@ def fetch_tor_bundle_url() -> list[str]:
 
 
 def download_and_extract_tor() -> tuple[bool, str]:
-    """Download portable Tor Expert Bundle with multi-mirror support and extract."""
     ensure_dirs()
     TOR_DIR.mkdir(parents=True, exist_ok=True)
     TOR_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -141,7 +133,7 @@ def download_and_extract_tor() -> tuple[bool, str]:
     if not downloaded:
         return False, f"Tor download failed across all mirrors: {last_err or 'Network timeout'}"
 
-    # Extract using system tar.exe or python tarfile fallback
+
     extracted = False
     tar_exe = shutil.which("tar.exe") or shutil.which("tar")
     if tar_exe:
@@ -169,7 +161,6 @@ def download_and_extract_tor() -> tuple[bool, str]:
 
 
 def is_portable_tor_running() -> bool:
-    """Check if our managed portable tor.exe process is alive."""
     if not TOR_PID_FILE.is_file():
         return False
     try:
@@ -182,7 +173,6 @@ def is_portable_tor_running() -> bool:
 
 
 def start_portable_tor() -> tuple[bool, str]:
-    """Start the portable Tor process in the background."""
     if test_socks5_alive(TOR_DEFAULT_SOCKS_PORT) or test_socks5_alive(TOR_BROWSER_SOCKS_PORT):
         target = get_active_tor_target()
         return True, f"Tor SOCKS already running on {target[0]}:{target[1]}"
@@ -223,7 +213,7 @@ def start_portable_tor() -> tuple[bool, str]:
     except Exception as exc:
         return False, f"Failed to spawn tor.exe: {exc}"
 
-    # Wait for SOCKS port to open (up to 25s for first bootstrap)
+
     for _ in range(25):
         if test_socks5_alive(TOR_DEFAULT_SOCKS_PORT):
             return True, f"Portable Tor started on 127.0.0.1:{TOR_DEFAULT_SOCKS_PORT}"
@@ -233,7 +223,6 @@ def start_portable_tor() -> tuple[bool, str]:
 
 
 def stop_portable_tor() -> tuple[bool, str]:
-    """Terminate the managed portable Tor process."""
     if not TOR_PID_FILE.is_file():
         return True, "Portable Tor is not running."
     try:
@@ -265,7 +254,6 @@ def _tor_auth_cookie() -> Path | None:
 
 
 def signal_tor_newnym(control_port: int = 9051) -> bool:
-    """Send SIGNAL NEWNYM to Tor control port to build a fresh circuit and exit node."""
     cookie = _tor_auth_cookie()
     auth = f'AUTHENTICATE "{cookie.read_bytes().hex()}"\r\n' if cookie else 'AUTHENTICATE ""\r\n'
     try:
@@ -291,7 +279,6 @@ def _tor_egress_ip() -> str:
 
 
 def rotate_tor_circuit() -> tuple[bool, str]:
-    """Rotate Tor circuit and confirm that the exit address changed."""
     before = _tor_egress_ip()
 
     for port in (9051, 9151):
@@ -321,7 +308,7 @@ def rotate_tor_circuit() -> tuple[bool, str]:
             f"Tor accepted the circuit request but the exit IP stayed at {after}"
         )
 
-    # No control port: restart the portable daemon to force a new circuit.
+
     if is_portable_tor_running():
         stop_portable_tor()
         time.sleep(1.0)
@@ -352,7 +339,6 @@ def rotate_tor_circuit() -> tuple[bool, str]:
 
 
 def _recv_exact(sock: socket.socket, size: int) -> bytes:
-    """Read exactly ``size`` bytes or return what is available on close."""
     data = b""
     while len(data) < size:
         chunk = sock.recv(size - len(data))
@@ -371,10 +357,9 @@ def open_socks5_tunnel(
     username: str = "",
     password: str = "",
 ) -> socket.socket:
-    """Establish an upstream TCP tunnel through a SOCKS5 proxy server."""
     sock = socket.create_connection((socks_host, socks_port), timeout=timeout)
     try:
-        # Offer no-auth and username/password; the server picks one.
+
         sock.sendall(b"\x05\x02\x00\x02")
         resp = _recv_exact(sock, 2)
         if len(resp) < 2 or resp[0] != 5:
@@ -402,7 +387,7 @@ def open_socks5_tunnel(
                 f"SOCKS5 proxy does not offer a supported auth method ({method})"
             )
 
-        # Connect command: support IPv4 (ATYP=1), IPv6 (ATYP=4), and Domain (ATYP=3)
+
         port_bytes = dest_port.to_bytes(2, "big")
         try:
             ip_v4 = socket.inet_aton(dest_host)

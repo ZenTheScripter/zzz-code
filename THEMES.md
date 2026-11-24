@@ -121,11 +121,11 @@ is why no theme needs an asset and nothing has to be fetched at paint time:
 Every surface in the shell is one of four layers stacked on a base. Get the
 steps right and the rest follows:
 
-- `base` — the page. This is the colour you see behind everything.
-- `layer-01` — one step away from the page: the sidebar, the settings rail.
-- `layer-02` — two steps: cards, the composer, list rows at rest.
-- `layer-03` — three steps: a row under the pointer, the selected tab pill.
-- `layer-04` — four steps: a row being clicked, the outline of a text input.
+- `base` - the page. This is the colour you see behind everything.
+- `layer-01` - one step away from the page: the sidebar, the settings rail.
+- `layer-02` - two steps: cards, the composer, list rows at rest.
+- `layer-03` - three steps: a row under the pointer, the selected tab pill.
+- `layer-04` - four steps: a row being clicked, the outline of a text input.
 
 A dark palette steps **up** in lightness (each layer a touch lighter than the
 one below). A light palette steps **down** (each layer a touch darker). Six to

@@ -1,10 +1,3 @@
-"""Auto-Resume module for OpenCode Unlimited.
-
-Automatically detects when a rate limit is bypassed, clears client-side database
-lockouts (free-limit / go-upsell), reloads the OpenCode interface, and sends
-a 'continue' action to the active OpenCode session.
-"""
-
 from __future__ import annotations
 
 import os
@@ -25,7 +18,6 @@ AUTO_RESUME_FLAG = LANE_DIR / "auto_resume.flag"
 
 
 def is_auto_resume_enabled() -> bool:
-    """Return True if auto-resume is enabled (default is enabled)."""
     if AUTO_RESUME_FLAG.is_file():
         try:
             return AUTO_RESUME_FLAG.read_text(encoding="utf-8").strip() != "0"
@@ -35,17 +27,11 @@ def is_auto_resume_enabled() -> bool:
 
 
 def set_auto_resume(enable: bool) -> None:
-    """Enable or disable the auto-resume feature."""
     LANE_DIR.mkdir(parents=True, exist_ok=True)
     AUTO_RESUME_FLAG.write_text("1\n" if enable else "0\n", encoding="utf-8")
 
 
 def clear_opencode_free_limit() -> int:
-    """Delete client-side free-limit and go-upsell lockout rows from drafts.sqlite.
-
-    OpenCode Desktop stores rate limit timestamps in drafts.sqlite (table 'state').
-    Even after IP rotation, the UI blocks user prompts until this timestamp is purged.
-    """
     candidates = [
         Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "ai.opencode.desktop" / "drafts.sqlite",
         Path.home() / ".config" / "ai.opencode.desktop" / "drafts.sqlite",
@@ -79,10 +65,6 @@ def clear_opencode_free_limit() -> int:
 
 
 def get_latest_session_info() -> tuple[str, str, str] | None:
-    """Query opencode.db for the most recently active non-archived session.
-
-    Returns (session_id, directory, title) or None.
-    """
     db_path = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
     if not db_path.is_file():
         return None
@@ -104,7 +86,6 @@ def get_latest_session_info() -> tuple[str, str, str] | None:
 
 
 def send_continue_keystroke(reload_first: bool = True) -> bool:
-    """Send reload (^r) and 'continue{ENTER}' to active OpenCode Desktop or Terminal window."""
     if sys.platform != "win32":
         try:
             import shutil
@@ -119,7 +100,7 @@ def send_continue_keystroke(reload_first: bool = True) -> bool:
             pass
         return False
 
-    # 1. Native Windows Win32 API window focus and key dispatch
+
     try:
         import ctypes
         from ctypes import wintypes
@@ -179,14 +160,14 @@ def send_continue_keystroke(reload_first: bool = True) -> bool:
         user32.EnumWindows(CB_TYPE(_enum_cb), 0)
 
         for hwnd, title, pname in target_hwnds:
-            # SW_RESTORE = 9
+
             user32.ShowWindow(hwnd, 9)
             user32.SetForegroundWindow(hwnd)
             time.sleep(0.4)
             if user32.GetForegroundWindow() != hwnd:
-                # Windows refused the focus change; never type into another app.
+
                 continue
-            # If requested, send Ctrl+R to reload UI (reloading drops the free-limit block screen)
+
             if reload_first and pname == "opencode.exe":
                 ps_reload = """
                 Add-Type -AssemblyName System.Windows.Forms
@@ -227,7 +208,6 @@ _SESSION_ID_RE = re.compile(r"\bsessionID=(ses_[A-Za-z0-9]+)")
 
 
 def session_id_in(line: str) -> str:
-    """The OpenCode session a log line belongs to ('' if none). Wall errors carry 'sessionID=ses_...'."""
     match = _SESSION_ID_RE.search(line or "")
     return match.group(1) if match else ""
 
@@ -246,7 +226,6 @@ def _session_directory(session_id: str) -> str:
 
 
 def _stop_stale_continue(oc: str, session_id: str) -> None:
-    """End an earlier 'continue' we sent to this session if it is still hanging around."""
     try:
         import psutil
 
@@ -268,7 +247,6 @@ def _stop_stale_continue(oc: str, session_id: str) -> None:
 
 
 def resume_sessions(session_ids: list[str]) -> tuple[int, list[str]]:
-    """Send 'continue' to each listed session through OpenCode's background service."""
     oc = find_opencode_cli()
     if not oc:
         return 0, ["OpenCode CLI not found"]
@@ -291,7 +269,6 @@ def resume_sessions(session_ids: list[str]) -> tuple[int, list[str]]:
 
 
 def _dispatch_cli_resume(oc: str, sess: tuple[str, str, str] | None) -> bool:
-    """Start one CLI run that continues the newest session."""
     if sess:
         sess_id, directory, _title = sess
         cmd = opencode_command(oc, ["run", "--session", sess_id, "continue"])
@@ -313,7 +290,6 @@ def _dispatch_cli_resume(oc: str, sess: tuple[str, str, str] | None) -> bool:
 
 
 def resume_active_session(session_ids: list[str] | None = None) -> tuple[bool, str]:
-    """Resume OpenCode after a new IP: every given session, or the active one if none are known."""
     if not is_auto_resume_enabled():
         return False, "Auto-resume is disabled."
 
@@ -328,11 +304,8 @@ def resume_active_session(session_ids: list[str] | None = None) -> tuple[bool, s
         details.extend(notes)
         if sent:
             return True, " | ".join(details)
-        # Nothing could be sent that way: fall through to the active window.
 
-    # Prefer the open Desktop window so the user sees the resumed session.
-    # Only fall back to a detached CLI run when no window is available; running
-    # both at once creates duplicate turns in the same session.
+
     if send_continue_keystroke(reload_first=True):
         details.append("sent reload and 'continue' to the OpenCode window")
         return True, " | ".join(details)

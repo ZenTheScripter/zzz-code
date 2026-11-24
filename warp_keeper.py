@@ -1,5 +1,3 @@
-"""Windows WARP keeper: keeps the selected WARP mode connected and repairs dropped tunnels."""
-
 from __future__ import annotations
 
 import os
@@ -38,7 +36,6 @@ _last_repair = 0.0
 
 
 def _heartbeat() -> None:
-    """Cheap liveness signal the app checks; a running but hung keeper stops writing this."""
     try:
         HEARTBEAT_FILE.write_text(str(int(time.time())), encoding="utf-8")
     except Exception:
@@ -80,11 +77,9 @@ def _registration_missing(raw: str) -> bool:
 
 
 def ensure_connected(warp_bin: str | None = None) -> bool:
-    """Keep the WARP tunnel connected without resetting a healthy session."""
     global _last_repair
 
-    # Cold start: outside a launcher session the tunnel must stay down, so the
-    # keeper never dials and never repairs. `~/.zzzcode/warp_cold` is the door.
+
     if not warp_allowed():
         return False
 
@@ -100,11 +95,11 @@ def ensure_connected(warp_bin: str | None = None) -> bool:
         current_mode = warp_mode(warp_bin=warp_bin)
         if not current_mode or current_mode == desired_mode:
             return True
-        # The selected scope changed while the tunnel stayed up. Apply the
-        # mode before returning so the isolated proxy port is actually bound.
+
+
         append_log(
             KEEPER_LOG_FILE,
-            f"operation mode drift ({current_mode} -> {desired_mode}) — applying selected scope",
+            f"operation mode drift ({current_mode} -> {desired_mode}) - applying selected scope",
         )
         ensure_warp_mode(warp_bin, scope)
         if _wait_connected(warp_bin, 8):
@@ -118,7 +113,7 @@ def ensure_connected(warp_bin: str | None = None) -> bool:
         _, _, raw = warp_status(warp_bin=warp_bin, force=True)
 
     if _registration_missing(raw):
-        append_log(KEEPER_LOG_FILE, "registration missing — creating a new one")
+        append_log(KEEPER_LOG_FILE, "registration missing - creating a new one")
         if not repair_warp_registration(warp_bin, 3):
             return False
         raw = ""
@@ -130,7 +125,7 @@ def ensure_connected(warp_bin: str | None = None) -> bool:
         return False
     _last_repair = time.monotonic()
 
-    append_log(KEEPER_LOG_FILE, "tunnel disconnected — renewing keys and reconnecting")
+    append_log(KEEPER_LOG_FILE, "tunnel disconnected - renewing keys and reconnecting")
     run_warp(["tunnel", "rotate-keys"], warp_bin=warp_bin, timeout=15.0)
     if _connect(warp_bin, scope):
         return True
@@ -151,13 +146,6 @@ def _port_open(port: int) -> bool:
 
 
 def _start_service_proxy(quiet: bool = False) -> object | None:
-    """Bind the lane proxy on the first port this machine can actually use.
-
-    Windows reserves whole port ranges for Hyper-V and WSL, and a reserved port
-    fails the bind with WSAEACCES instead of WSAEADDRINUSE. `service_proxy_port`
-    probes for that and records the winner in lane/proxy_port.txt, which is what
-    the launcher, the doctor and the desktop wiring read back.
-    """
     with _PROXY_LOCK:
         port = service_proxy_port()
         if _port_open(port):
@@ -180,8 +168,7 @@ def _start_service_proxy(quiet: bool = False) -> object | None:
 
 
 def _proxy_watchdog() -> None:
-    """Keep the local proxy served; rebind it within seconds if it disappears."""
-    servers = []  # keep references so the servers are not garbage collected
+    servers = []
     bind_failing = False
     while True:
         try:
@@ -213,12 +200,12 @@ def main() -> int:
     append_log(KEEPER_LOG_FILE, f"keeper up (tick={TICK_SECONDS}s, warp={'found' if warp_bin else 'none'})")
     _heartbeat()
 
-    # Start the desktop/service proxy so every egress mode is routable.
+
     proxy_srv = _start_service_proxy()
     reported_external = proxy_srv is None and _port_open(service_proxy_port())
     threading.Thread(target=_proxy_watchdog, daemon=True).start()
 
-    # On startup, allow network interface initialization if booting and warp is installed
+
     if warp_bin:
         for _ in range(6):
             rc, _ = run_warp(["status"], warp_bin=warp_bin, timeout=8.0)
@@ -255,10 +242,8 @@ def main() -> int:
                         if not is_killswitch_installed():
                             install_killswitch()
             elif mode == "tor":
-                # Restart the managed Tor daemon only when its process is gone,
-                # or when a live process has not opened its SOCKS port after a
-                # generous bootstrap window. Restarting on every tick would kill
-                # a slow first bootstrap before it completes.
+
+
                 try:
                     from tor_manager import (
                         TOR_PID_FILE,
@@ -278,7 +263,7 @@ def main() -> int:
                             if age > 240.0:
                                 append_log(
                                     KEEPER_LOG_FILE,
-                                    "Tor SOCKS port did not open within 240s — restarting Tor",
+                                    "Tor SOCKS port did not open within 240s - restarting Tor",
                                 )
                                 stop_portable_tor()
                                 start_portable_tor()

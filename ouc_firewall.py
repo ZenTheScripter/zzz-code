@@ -1,5 +1,3 @@
-"""Optional Windows Defender Firewall kill-switch rules for opencode-cli."""
-
 from __future__ import annotations
 
 import sys
@@ -23,7 +21,6 @@ _PUBLIC_RANGES = (
 
 
 def is_killswitch_installed() -> bool:
-    """Return True if the OUC_LEAKGUARD_CLI firewall rule exists."""
     try:
         res = run_hidden(
             ["netsh", "advfirewall", "firewall", "show", "rule", f"name={CLI_RULE_NAME}"],
@@ -35,7 +32,6 @@ def is_killswitch_installed() -> bool:
 
 
 def install_killswitch() -> tuple[bool, str]:
-    """Install outbound non-loopback/non-LAN block rule for opencode-cli.exe."""
     if not is_admin():
         return False, "administrator privileges required for firewall kill-switch"
 
@@ -68,7 +64,6 @@ def install_killswitch() -> tuple[bool, str]:
 
 
 def remove_killswitch() -> tuple[bool, str]:
-    """Remove any OUC_LEAKGUARD firewall rules."""
     if not is_admin():
         return False, "administrator privileges required to remove firewall rules"
     run_hidden(

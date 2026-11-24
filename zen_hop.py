@@ -1,5 +1,3 @@
-"""Zen Hop for Windows: manual WARP /64 identity rotation."""
-
 from __future__ import annotations
 
 import json

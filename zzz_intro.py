@@ -1,19 +1,3 @@
-"""Console intro and menu animation for the ZzZ Code launcher.
-
-Stages, in order:
-
-1. `rain_reveal()`  green rain that carves "MADE BY ZZZ" out of the field, one
-                    column at a time, then drains and leaves the art behind
-2. `word_glow()`    a band of light crossing that art while it breathes
-3. `menu_banner()`  the travelling rule and decoding tagline above a menu page
-
-Everything is opt-in and bounded: `enabled()` is False when stdout is not a TTY,
-when `ZZZ_NO_ANIM=1` is set, or when the console refused VT (Windows 10 older
-than 1511, a redirected pipe, a CI runner). In that case the caller prints its
-static art and nothing loops. Every animation has a hard frame cap derived from
-its duration, so a slow terminal cannot stretch the boot into a hang.
-"""
-
 from __future__ import annotations
 
 import math
@@ -23,8 +7,7 @@ import shutil
 import sys
 import time
 
-# 5x7 cap bitmap, one column of gutter between glyphs, rendered as four text
-# rows of half blocks. Full A-Z plus digits so any status word can be drawn.
+
 FONT = {
     "A": ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
     "B": ("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
@@ -68,7 +51,7 @@ FONT = {
 FONT_H = 7
 FONT_W = 5
 
-# Green ramp for the rain: darkest trail tail -> brightest head.
+
 RAIN_RAMP = ("22", "22", "28", "28", "34", "34", "40", "46", "46", "231")
 RAIN_GLYPHS = "01<>[]{}/\\|=+-*#$%&@;:!?0123456789"
 
@@ -76,7 +59,7 @@ WORD_RAMP = ("28", "34", "40", "46", "46", "46", "82")
 SWEEP_COLOR = "231"
 BASE_COLOR = "22"
 
-# Printed above every menu page once the boot animation has had its run.
+
 MENU_TAGLINE = "abliterated sheet  \u00b7  35 themes  \u00b7  warp lane  \u00b7  self update"
 
 
@@ -85,7 +68,6 @@ def _c(code: str, text: str) -> str:
 
 
 def enabled() -> bool:
-    """Animations are opt-out by flag and impossible without a terminal."""
     if os.environ.get("ZZZ_NO_ANIM") == "1":
         return False
     try:
@@ -102,9 +84,6 @@ def size() -> tuple[int, int]:
     return max(20, cols), max(10, rows)
 
 
-# ---------------------------------------------------------------------- font
-
-
 def _grid(word: str) -> list[list[bool]]:
     cells = []
     width = 0
@@ -117,8 +96,7 @@ def _grid(word: str) -> list[list[bool]]:
         width += advance
     width = max(1, width - 1)
 
-    # Padded to an even height: a 7-row font rendered as half blocks would drop
-    # its last pixel row, which cuts the baseline off every glyph.
+
     height = FONT_H + (FONT_H % 2)
     grid = [[False] * width for _ in range(height)]
     x = 0
@@ -142,7 +120,6 @@ def _half(top: bool, bottom: bool) -> str:
 
 
 def art(word: str, ramp: tuple[str, ...] = WORD_RAMP) -> list[str]:
-    """Block art rows, shaded left to right, no ANSI (plain text)."""
     grid = _grid(word)
     height = len(grid)
     width = len(grid[0])
@@ -159,7 +136,6 @@ def art(word: str, ramp: tuple[str, ...] = WORD_RAMP) -> list[str]:
 
 
 def tinted(word: str, ramp: tuple[str, ...] = WORD_RAMP) -> list[str]:
-    """Block art rows with a left-to-right colour ramp baked in."""
     plain = art(word)
     width = max((len(r) for r in plain), default=1)
     rows = []
@@ -183,18 +159,7 @@ def tinted(word: str, ramp: tuple[str, ...] = WORD_RAMP) -> list[str]:
     return rows
 
 
-# --------------------------------------------------------------------- rain
-
-
 def matrix_rain(duration: float = 2.4, fps: int = 24) -> None:
-    """Green code rain, then leave the cursor on a clean line.
-
-    Three details make it read like the film instead of a screensaver: the head
-    glyph is white and the two behind it are bright green, so every column has a
-    visible leading edge; a handful of columns get a random bright flash per
-    frame; and the first quarter of the run ramps the density up from a few
-    drops so the screen fills instead of starting full.
-    """
     if not enabled():
         return
     w, h = size()
@@ -211,7 +176,7 @@ def matrix_rain(duration: float = 2.4, fps: int = 24) -> None:
     ramp = ("22", "22", "28", "34", "40", "46", "231")
     lead = ("231", "46", "40")
     ramp_in = max(1, frames // 4)
-    # A few columns restart with a visible flash so the field never looks even.
+
     flash = [rng.randint(0, frames - 1) for _ in range(max(2, cols // 10))]
 
     out = sys.stdout
@@ -279,11 +244,7 @@ def matrix_rain(duration: float = 2.4, fps: int = 24) -> None:
         out.flush()
 
 
-# ------------------------------------------------------------- rain reveal
-
-
 def _place(art_rows: list[str], cols: int, rows: int) -> tuple[int, int]:
-    """Where the word sits: centred on both axes, one row below dead centre."""
     width = max((len(r) for r in art_rows), default=1)
     left = max(0, (cols - width) // 2)
     top = max(1, (rows - len(art_rows)) // 2 + 1)
@@ -293,7 +254,6 @@ def _place(art_rows: list[str], cols: int, rows: int) -> tuple[int, int]:
 
 
 def _pack(chars: list[tuple[str, str | None]]) -> str:
-    """Join (char, colour) pairs into colour runs."""
     chunks: list[str] = []
     run, run_color = "", None
     for ch, color in chars:
@@ -310,17 +270,6 @@ def _pack(chars: list[tuple[str, str | None]]) -> str:
 def rain_reveal(
     word: str = "MADE BY ZZZ", duration: float = 3.6, fps: int = 24
 ) -> tuple[list[str], int, int] | None:
-    """Rain that carves `word` out of the field, column by column.
-
-    A column's letter cells lock the moment its drop passes the word band, so the
-    art assembles left to right inside the falling code instead of fading in as a
-    separate layer. The last third drains: drops stop respawning, trails collapse,
-    and what is left standing is the word, centred in the lower half of the
-    console with the empty rain above it.
-
-    Returns the plain art rows and their origin so `word_glow()` can animate the
-    same art in place, or None when animations are off.
-    """
     art_rows = art(word)
     if not enabled():
         for line in tinted(word):
@@ -336,16 +285,14 @@ def rain_reveal(
     frames = max(1, min(int(duration * fps), 200))
     delay = 1.0 / max(1, fps)
     drain = frames * 2 // 3
-    band_bottom = top + count            # the row the first letter needs cleared
+    band_bottom = top + count
 
     rng = random.Random()
     head = [rng.randint(-rows, -1) for _ in range(cols)]
     speed = [rng.choice((1, 1, 2, 2, 3)) for _ in range(cols)]
     trail = [rng.randint(6, max(9, rows // 2)) for _ in range(cols)]
-    # Deepest row each column's drop has ever reached. A letter cell is carved
-    # once its own row is at or above that mark, so the art grows behind the
-    # drops instead of switching on all at once, and never un-carves when the
-    # column dies.
+
+
     reached = [-(10 ** 6)] * cols
     cells = [[" "] * cols for _ in range(rows)]
     ramp = ("22", "22", "28", "34", "40", "46", "231")
@@ -359,13 +306,12 @@ def rain_reveal(
             for c in range(cols):
                 if frame >= drain:
                     if reached[c] < band_bottom:
-                        # Drain phase: hurry the stragglers down through the word
-                        # so every column has carved its letters before the rain
-                        # stops.
+
+
                         head[c] = max(head[c], 0) + 5
                     else:
-                        # Carved: run the drop out of the frame and collapse the
-                        # trail behind it, which is what leaves the art clean.
+
+
                         head[c] += 5
                         trail[c] = max(1, trail[c] - 2)
                 else:
@@ -374,7 +320,7 @@ def rain_reveal(
                     reached[c] = head[c]
                 if head[c] - trail[c] > rows:
                     if frame >= drain:
-                        head[c] = -(10 ** 6)      # out of play, never respawns
+                        head[c] = -(10 ** 6)
                     else:
                         head[c] = rng.randint(-2 * rows, 0)
                         speed[c] = rng.choice((1, 1, 2, 2, 3))
@@ -404,8 +350,8 @@ def rain_reveal(
                         and art_line[x] != " "
                         and reached[c] >= r
                     ):
-                        # How far the drop has run past this cell: bright right
-                        # behind the head, cooling as the trail falls away.
+
+
                         age = reached[c] - r
                         if age <= 2:
                             color = "231"
@@ -445,11 +391,6 @@ def rain_reveal(
 def word_glow(
     art_rows: list[str], left: int, top: int, cycles: float = 2.0, delay: float = 0.028
 ) -> None:
-    """A band of light crosses the standing word while it breathes.
-
-    Absolute cursor addressing keeps the art where the rain left it, so the glow
-    reads as the same object being lit rather than a second drawing.
-    """
     if not enabled() or not art_rows:
         return
     width = max((len(r) for r in art_rows), default=1)
@@ -500,17 +441,6 @@ def shell_reveal(
     delay: float = 0.05,
     beat: float = 0.85,
 ) -> None:
-    """The word as a shell transcript, typed under the art the rain left.
-
-    Three lines, absolute addressed so the rain art above is never scrolled:
-
-        $ echo "MADE BY ZZZ"        typed character by character, cursor trailing
-        MADE BY ZZZ                 lands in the word ramp, left to right
-        $                           blinking prompt, holds for `beat` seconds
-
-    Every coordinate is clamped to the terminal, so a short window renders
-    nothing instead of wrapping the art off screen.
-    """
     if not enabled():
         return
     cols, rows = size()
@@ -574,7 +504,6 @@ def shell_reveal(
 
 
 def intro_sequence(word: str = "MADE BY ZZZ", duration: float = 3.6, fps: int = 24) -> None:
-    """Rain reveal, the light crossing the art, then the shell transcript."""
     geometry = rain_reveal(word, duration=duration, fps=fps)
     if not geometry:
         return
@@ -583,11 +512,7 @@ def intro_sequence(word: str = "MADE BY ZZZ", duration: float = 3.6, fps: int = 
     shell_reveal(word, left, top, len(art_rows))
 
 
-# ------------------------------------------------------------- menu banner
-
-
 def _wave(width: int, head: float) -> str:
-    """A rule with a bright head running along it, gradient trailing both ways."""
     pair: list[tuple[str, str]] = []
     for x in range(width):
         d = abs(x - head)
@@ -606,11 +531,6 @@ def _wave(width: int, head: float) -> str:
 
 
 def menu_banner(tagline: str = MENU_TAGLINE, width: int = 0, indent: int = 2, animate: bool = True) -> None:
-    """Travelling rule plus a tagline that decodes, printed above a menu page.
-
-    Static on every repaint except the first few after boot, so navigation stays
-    instant and the movement only happens when it is worth watching.
-    """
     width = width or len(tagline)
     try:
         avail = max(20, size()[0] - indent - 1)
@@ -655,11 +575,7 @@ def menu_banner(tagline: str = MENU_TAGLINE, width: int = 0, indent: int = 2, an
         out.flush()
 
 
-# -------------------------------------------------------------------- sweep
-
-
 def _paint_band(plain: list[str], band: int) -> list[str]:
-    """One frame of the sweep: colour by distance from the band column."""
     rows = []
     for line in plain:
         chunks = []
@@ -691,12 +607,6 @@ def _paint_band(plain: list[str], band: int) -> list[str]:
 
 
 def sweep(word: str, step: int = 4, delay: float = 0.022, indent: int = 3) -> list[str]:
-    """Paint `word` dark, then run a bright band across it.
-
-    Returns the plain art rows so the caller can reuse them without a second
-    rasterisation pass. When animations are off this prints the static tinted
-    art and returns immediately.
-    """
     plain = art(word)
     pad = " " * indent
     if not enabled():
@@ -729,7 +639,6 @@ def sweep(word: str, step: int = 4, delay: float = 0.022, indent: int = 3) -> li
 
 
 def reveal(line: str, delay: float = 0.018) -> None:
-    """Print one line, pause, so a panel assembles itself instead of popping."""
     if enabled() and delay > 0:
         print(line)
         sys.stdout.flush()
@@ -746,14 +655,6 @@ def decode_block(
     passes: int = 4,
     final: list[str] | None = None,
 ) -> None:
-    """Resolve `lines` in place, at the cursor, without touching the page above.
-
-    Rows start as noise and lock in from the left one column at a time; the
-    unlocked tail keeps mutating. Box drawing and spaces are exempt so the frame
-    stays readable while the text inside it resolves. Each frame is rewritten
-    over the previous one by moving up `len(lines) - 1` rows, so the wordmark and
-    the banner printed earlier keep their place.
-    """
     if not enabled() or not lines:
         for line in lines:
             print(line)
@@ -782,12 +683,11 @@ def decode_block(
             time.sleep(delay)
             if frame < frames - 1:
                 out.write("\x1b[%dA" % max(0, total - 1))
-        # Park the cursor back on the block's first row: the last scrambled row
-        # ends without a newline, so without this the settled frame lands under
-        # the noise instead of over it.
+
+
         out.write("\x1b[%dA" % max(0, total - 1))
-        # The caller passes the coloured rows so the settled frame is the real
-        # UI and not the plain text the scramble was built from.
+
+
         settled = final if final and len(final) == total else lines
         for i, line in enumerate(settled):
             out.write("\r" + line + ("\n" if i < total - 1 else ""))

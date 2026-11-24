@@ -1,32 +1,3 @@
-#!/usr/bin/env python3
-"""Rebrand the OpenCode desktop wordmark to ZZZCODE, in place.
-
-Two separate inline SVGs live in the renderer bundle
-(`out/renderer/assets/main-*.js` inside `app.asar`):
-
-  * `P3t` - viewBox `0 0 234 42`, the hero wordmark. 6-unit cells, 4x5 pixel
-    glyphs on a 30-unit pitch. Each glyph is two paths: a `--icon-weak-base`
-    inner block plus a `--icon-base` / `--icon-strong-base` outline.
-  * `HBn` - viewBox `0 0 720 129`, the first-launch draw-on animation.
-    18.46 x 18.43 unit cells.
-
-`app.asar` addresses members by byte offset, so both replacements must be
-byte-length identical to the art they replace. The ZZZCODE art is smaller than
-the shipped art, so the difference is padded with spaces inside the enclosing
-`<g>` - legal SVG text that never renders.
-
-    python patch_desktop.py --check
-    python patch_desktop.py             # patch in place, writes a .bak first
-    python patch_desktop.py --restore
-
-The launcher never leaves the vendor bundle patched: it applies the art for the
-duration of a ZzZ desktop session and restores the pristine `.bak` when the app
-exits, so launching OpenCode Desktop any other way stays vanilla. The module is
-importable for that lifecycle:
-
-    from patch_desktop import asar_state, patch_asar, restore_asar
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -47,18 +18,14 @@ ASAR = (
 )
 BACKUP = ASAR.with_suffix(".asar.zzz.bak")
 
-# Locators are structural, never minified local names. The Vite pass renames
-# every binding on each build (`P3t=z(` became `S6t=z(`, `ta=` became `la=`), so
-# an anchor written against a name dies on every vendor update. What survives is
-# what belongs to the art and the DOM: the viewBox, the slot attributes, the
-# glyph-record shape, the literal geometry. Everything below is anchored there.
+
 VIEWBOX_HERO = b'viewBox="0 0 234 42"'
 VIEWBOX_SPLASH = b'viewBox="0 0 720 129"'
 TEMPLATE_OPEN = b"(`"
 PATH_OPEN = b"<path"
 PATH_CLOSE = b"</path>"
 
-# The route chunk that owns the draw-on wordmark is the one carrying this slot.
+
 WORDMARK_SLOT = b"data-slot=wordmark-flat"
 FLAT_ARRAY_OPEN = b"[{cx:"
 FLAT_ARRAY_TERM = b"}],"
@@ -67,26 +34,20 @@ PIN_ROWS = 14
 PIN_CELL = re.compile(rb"`[0-3.]{%d}`" % PIN_COLUMNS)
 
 
-
-# ---------------------------------------------------------------- pixel font
-
-# 4x5 bitmaps. The hero art and the splash art share the shapes, only the cell
-# size and pitch differ.
 GLYPHS = {
     "Z": ["####", "...#", "..#.", ".#..", "####"],
     "C": ["####", "#...", "#...", "#...", "####"],
     "O": ["####", "#..#", "#..#", "#..#", "####"],
-    "D": ["####", "#..#", "#..#", "#..#", "####"],  # + right ascender
+    "D": ["####", "#..#", "#..#", "#..#", "####"],
     "E": ["####", "#..#", "####", "#...", "####"],
 }
-# letter -> (row_from, row_to, col); row -1 sits one cell above the cap row.
+
 ASCENDER = {"D": (-1, -1, 3)}
 
 WORD = "ZZZCODE"
 
 
 def _edges(bitmap, ascender=None):
-    """Directed cell-boundary edges, clockwise around every filled cell."""
     filled = set()
     for r, row in enumerate(bitmap):
         for c, ch in enumerate(row):
@@ -111,7 +72,6 @@ def _edges(bitmap, ascender=None):
 
 
 def _loops(edges):
-    """Chain directed edges into closed loops, preferring the tightest right turn."""
     by_start = {}
     for a, b in edges:
         by_start.setdefault(a, []).append(b)
@@ -122,10 +82,10 @@ def _loops(edges):
         cross = din[0] * dout[1] - din[1] * dout[0]
         dot = din[0] * dout[0] + din[1] * dout[1]
         if cross < 0:
-            return 0      # right turn keeps the filled region on the right
+            return 0
         if cross == 0 and dot > 0:
-            return 1      # straight
-        return 2          # left turn
+            return 1
+        return 2
 
     loops = []
     remaining = {k: list(v) for k, v in by_start.items()}
@@ -151,7 +111,6 @@ def _loops(edges):
 
 
 def _simplify(loop):
-    """Drop collinear midpoints from a closed integer loop."""
     n = len(loop)
     out = []
     for i in range(n):
@@ -165,7 +124,6 @@ def _simplify(loop):
 
 
 def outline(bitmap, ox, oy, sx, sy, ascender=None, fmt=lambda v: "%.2f" % v) -> str:
-    """Tight contour `d` for one glyph, one subpath per disjoint lobe."""
     parts = []
     for loop in _loops(_edges(bitmap, ascender)):
         pts = _simplify(loop)
@@ -187,13 +145,11 @@ def outline(bitmap, ox, oy, sx, sy, ascender=None, fmt=lambda v: "%.2f" % v) -> 
     return "".join(parts)
 
 
-# --------------------------------------------------------------- hero (234x42)
-
 HERO_CELL = 6
 HERO_PITCH = 30
 HERO_VIEWBOX_W = 234
-# Weak underlay each letter carries in the shipped art, in cell coordinates
-# relative to the glyph origin: (col0, row0, col1, row1).
+
+
 HERO_WEAK = {
     "C": (1, 3, 4, 5),
     "O": (1, 3, 3, 5),
@@ -209,7 +165,7 @@ def _num(value) -> str:
 def build_hero(word: str) -> bytes:
     width = len(word) * HERO_PITCH - (HERO_PITCH - 4 * HERO_CELL)
     ox0 = (HERO_VIEWBOX_W - width) // 2
-    oy = HERO_CELL  # cap row starts one cell below the ascender row
+    oy = HERO_CELL
     out = []
     for index, letter in enumerate(word):
         ox = ox0 + index * HERO_PITCH
@@ -237,27 +193,18 @@ def build_hero(word: str) -> bytes:
     return "".join(out).encode("ascii")
 
 
-# ------------------------------------------------- flat hero (route chunk, 234x42)
-#
-# The wordmark the user actually sees on the new-session screen is not a
-# template: it is this array of glyph records, rendered one <g> per entry so the
-# draw-on animation can transform each letter. The `P3t` SVG above it is only
-# the shimmer overlay, so both have to be rewritten or the flat art shows
-# through underneath.
-
 FLAT_MARKER = b"ta=[{cx:"
 FLAT_TERMINATOR = b"],na=234"
 
 
 def build_flat(word: str) -> bytes:
-    """Glyph records for the draw-on wordmark, aligned with build_hero()."""
     width = len(word) * HERO_PITCH - (HERO_PITCH - 4 * HERO_CELL)
     ox0 = (HERO_VIEWBOX_W - width) // 2
     oy = HERO_CELL
     out = []
     for index, letter in enumerate(word):
         ox = ox0 + index * HERO_PITCH
-        cx = ox + 2 * HERO_CELL  # pivot: the component scales each glyph there
+        cx = ox + 2 * HERO_CELL
         weak_d = ""
         weak = HERO_WEAK.get(letter)
         if weak:
@@ -275,13 +222,11 @@ def build_flat(word: str) -> bytes:
         out.append(
             "{cx:%s,weak:`%s`,fill:`var(--icon-base)`,stem:`%s`}" % (_num(cx), weak_d, stem)
         )
-    # The component indexes glyph 7 for its cursor notch, so the slot has to
-    # exist; empty path data draws nothing and costs almost no bytes.
+
+
     out.append("{cx:222,weak:``,fill:`var(--icon-base)`,stem:``}")
     return ",".join(out).encode("ascii")
 
-
-# ------------------------------------------------------------ splash (720x129)
 
 SPLASH_CELL_X = 720 / 39.0
 SPLASH_CELL_Y = 129 / 7.0
@@ -313,28 +258,15 @@ def build_splash(word: str) -> bytes:
     return "".join(out).encode("ascii")
 
 
-# --------------------------------------------------------------- pins (78x14)
-
-# The pull animation is not vector art: while the wordmark is dragged a WebGL
-# canvas paints a board of little pegs, one peg per half-cell, decoded from 14
-# fixed-width strings of digits. `1` is a recessed peg, `2`/`3` are raised pegs
-# at two depths, `.` is an empty hole.
-#
-# Each glyph owns 8 columns and 10 rows: a 4x5 bitmap at 2x, an ascender band
-# one row above the cap block and a descender band one row below. Glyph i starts
-# at column 10*i, so the board left edge is the wordmark's left edge - both the
-# SVG art and the peg board begin at x=15 in the 234-wide hero viewBox.
-
 PIN_COLS = 78
 PIN_ROWS = 14
 PIN_PITCH = 10
-PIN_CAP_ROW = 2      # first row of the five cap bands
-PIN_ASC_ROW = 0      # the single ascender band
-PIN_INK_SPLIT = 4    # glyphs before this index use peg depth 2, after use 3
+PIN_CAP_ROW = 2
+PIN_ASC_ROW = 0
+PIN_INK_SPLIT = 4
 
 
 def _counters(bitmap):
-    """Cells inside the letter that are empty but not reachable from outside."""
     height, width = len(bitmap), len(bitmap[0])
     filled = {
         (r, c)
@@ -397,17 +329,7 @@ def build_pins(word: str) -> bytes:
     ).encode("ascii")
 
 
-# -------------------------------------------------------------------- asar io
-
-
 def asar_base(data: bytes) -> int:
-    """Absolute offset of the first member's bytes.
-
-    The header is two Pickles: a size word, then the JSON header string. The
-    string body starts at 16 and is padded to a 4-byte boundary, so the data
-    section does not begin at `8 + json_len` - that shortcut is 10 bytes early
-    on this bundle and shifts every splice into the tail of the previous member.
-    """
     json_len = struct.unpack("<I", data[12:16])[0]
     return 16 + json_len + ((4 - json_len % 4) % 4)
 
@@ -420,7 +342,6 @@ def load_asar():
 
 
 def parse_asar(data: bytes):
-    """Split an asar image that is already in memory."""
     json_len = struct.unpack("<I", data[12:16])[0]
     index = json.loads(data[16:16 + json_len].decode("utf-8", "replace"))
     return index, asar_base(data)
@@ -435,12 +356,6 @@ def renderer_bundle(index):
 
 
 def flat_route(data: bytes, index, base: int):
-    """The lazily loaded route chunk that carries the draw-on wordmark.
-
-    A build ships several `route-*.js` chunks and their order in the header is
-    not stable, so the one we want is identified by content: only the wordmark
-    chunk renders the `wordmark-flat` slot.
-    """
     assets = index["files"]["out"]["files"]["renderer"]["files"]["assets"]["files"]
     for name, entry in assets.items():
         size = int(entry.get("size", 0))
@@ -454,7 +369,6 @@ def flat_route(data: bytes, index, base: int):
 
 
 def locate_flat(data, offset, size, base):
-    """Resolve the glyph-record array of the draw-on wordmark."""
     body_start = base + offset
     body = data[body_start: body_start + size]
 
@@ -464,9 +378,8 @@ def locate_flat(data, offset, size, base):
     if body.count(FLAT_ARRAY_OPEN) != 1:
         raise RuntimeError("flat wordmark array is not unique")
     arr_start = at
-    # Glyph records never carry a bracket, so the first `]` after the open is the
-    # array close. A patched bundle keeps its padding between the last record and
-    # that bracket, which is why the terminator cannot be searched as `}],`.
+
+
     close = body.find(b"]", arr_start)
     if close < 0:
         raise RuntimeError("flat wordmark array is unterminated")
@@ -478,20 +391,14 @@ def locate_flat(data, offset, size, base):
     return {
         "file_start": body_start + arr_start,
         "literal": block,
-        "prefix": block[:1],          # the opening [
-        "suffix": block[-1:],         # the closing ]
+        "prefix": block[:1],
+        "suffix": block[-1:],
         "budget": len(block) - 2,
         "current": block[1:-1],
     }
 
 
 def locate_pins(data, offset, size, base):
-    """Resolve the 14-string peg board literal in byte space.
-
-    The literal is a run of PIN_ROWS backtick strings of exactly PIN_COLUMNS
-    cells each, so it is found by its shape: 14 consecutive matches of the cell
-    alphabet, then the closing bracket. No local name is involved.
-    """
     body_start = base + offset
     body = data[body_start: body_start + size]
 
@@ -509,8 +416,8 @@ def locate_pins(data, offset, size, base):
     lit_end = hits[-1].end()
     if body[lit_start:lit_start + 1] != b"[":
         raise RuntimeError("peg board literal is malformed")
-    # A patched bundle pads between the last row and the closing bracket, so the
-    # bracket is searched past any run of spaces the previous pass left behind.
+
+
     bracket = lit_end
     while bracket < len(body) and body[bracket:bracket + 1] == b" ":
         bracket += 1
@@ -530,20 +437,6 @@ def locate_pins(data, offset, size, base):
     }
 
 
-# The creature that rides the wordmark is placed by a run of flat constants:
-# X = hover anchor and neck base, Z = pack target, Q = notch home. The notch
-# rect and the two drag-grip rects are expressed separately. Every span below
-# is byte-length identical to the shipped one, so the bundle never shifts.
-#
-# Each span anchors on the shipped *numbers*, never on the binding name. The
-# minifier renames `Y/X/Z` to `X/Z/Q` between builds and the patch must not care.
-#
-# `legacy` holds shapes this tool wrote in an earlier pass. The grip span is the
-# one that moved the crew: the first release rewrote BOTH branches of the hit
-# rect, which parked the visible grab zone on the wordmark while the creature
-# rests past the viewBox. Pulled out, it had no grabbable surface left, so it
-# could never be dropped back into the notch. Only the hidden branch needs to
-# follow the notch; the visible branch keeps the shipped park geometry.
 ROUTE_SPANS = (
     {
         "label": "lodger neck anchor",
@@ -575,11 +468,8 @@ ROUTE_SPANS = (
         "new": b"t===`hidden`?{x:195,y:6,w:24,h:30}:{x:234,y:18,w:24,h:24}",
         "legacy": (b"t===`hidden`?{x:195,y:6,w:24,h:30}:{x:195,y:6,w:24,h:30.}",),
     },
-    # The pin-drop leg of the carry animation lerps to a bare literal pair
-    # (233, 18) that sits past the end of the old eight-glyph wordmark. ZZZCODE
-    # ends at x=219, so the drop has to happen over the final E, not beyond it.
-    # The two call shapes are `$(NAME,233,…)` and `$(233,NAME,…)`, so the span is
-    # keyed on the punctuation around the number, not on the helper's name.
+
+
     {
         "label": "pin drop out",
         "old": b",233,",
@@ -596,12 +486,6 @@ ROUTE_SPANS = (
 
 
 def locate_spans(data, offset, size, base):
-    """Resolve the flat route-chunk constant spans.
-
-    A span is in one of two states: shipped (`old`) or patched (`new`). A span
-    written by an earlier release still resolves, so an install that predates a
-    fix gets corrected instead of refused.
-    """
     body_start = base + offset
     body = data[body_start: body_start + size]
 
@@ -638,16 +522,7 @@ def locate_spans(data, offset, size, base):
     return out
 
 
-
 def locate(data, offset, size, base, label, viewbox):
-    """Resolve one wordmark template in byte space.
-
-    The template is a tagged literal: `NAME(`<svg … viewBox="…" …>`)`. The tag
-    name is minified on every build, so the viewBox is the anchor and the
-    literal open is the nearest `(` + backtick before it. Byte offsets matter:
-    the bundle carries multi-byte UTF-8 ahead of the template, so character
-    indexes do not line up with asar offsets.
-    """
     body_start = base + offset
     body = data[body_start: body_start + size]
 
@@ -676,11 +551,7 @@ def locate(data, offset, size, base, label, viewbox):
     if first < 0:
         raise RuntimeError("path block not found inside the template")
 
-    # Closes are not reliable: the templates are lit-html fragments, so the
-    # final <path> is left unterminated for the parser to close. If anything
-    # after the last </path> still opens a path, it is art, not template
-    # markup, and it has to be replaced too - otherwise the tail of the old
-    # wordmark keeps drawing on the right edge.
+
     last = literal.rfind(PATH_CLOSE)
     if last < 0:
         last = len(literal)
@@ -729,7 +600,6 @@ def plan(data, index, base):
 
 
 def classify(jobs) -> None:
-    """Mark every job done/pending and reject art that overflows its budget."""
     over = []
     for job in jobs:
         if job["kind"] == "span":
@@ -749,7 +619,6 @@ def classify(jobs) -> None:
 
 
 def apply_jobs(data, jobs):
-    """Splice every replacement in place. All jobs are length preserving."""
     out = bytearray(data)
     for job in jobs:
         if job["done"]:
@@ -767,14 +636,6 @@ def apply_jobs(data, jobs):
     return bytes(out)
 
 
-
-# ------------------------------------------------------------- lifecycle API
-#
-# The launcher applies the art for one desktop session and restores the pristine
-# bundle afterwards, so the vendor install is never left rebranded. These three
-# functions are the whole surface it needs; the CLI below is for humans.
-
-
 def sha256_file(path: Path, chunk: int = 8 * 1024 * 1024) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
@@ -787,12 +648,6 @@ def sha256_file(path: Path, chunk: int = 8 * 1024 * 1024) -> str:
 
 
 def asar_state() -> dict:
-    """Everything the launcher needs to decide what to do, without writing.
-
-    `pristine_sha` fingerprints the vendor art: the backup when one exists,
-    otherwise the live bundle when it is still untouched. A changed value means
-    the desktop app updated itself.
-    """
     state = {
         "available": ASAR.is_file(),
         "patched": False,
@@ -812,8 +667,8 @@ def asar_state() -> dict:
         names, jobs = plan(data, index, base)
         classify(jobs)
     except (RuntimeError, OSError, ValueError) as exc:
-        # A bundle written by an older pass resolves to nothing; the patch run
-        # rolls it back before retrying, so this is not a dead end.
+
+
         try:
             state["stale"] = BACKUP.is_file() and _carries_zzz(ASAR.read_bytes())
         except OSError:
@@ -833,7 +688,6 @@ def asar_state() -> dict:
 
 
 def patch_asar(retry: bool = True) -> tuple[bool, str]:
-    """Apply the ZZZCODE art to the installed desktop bundle, in place."""
     if not ASAR.is_file():
         return False, "desktop bundle not installed"
     data = b""
@@ -843,9 +697,8 @@ def patch_asar(retry: bool = True) -> tuple[bool, str]:
         names, jobs = plan(data, index, base)
         classify(jobs)
     except (RuntimeError, OSError, ValueError) as exc:
-        # A bundle left behind by an older release carries our art but no longer
-        # matches the current anchors. Roll it back and take a clean run at it
-        # instead of refusing the install.
+
+
         if retry and BACKUP.is_file() and _carries_zzz(data):
             ok, _ = restore_asar()
             if ok:
@@ -856,8 +709,7 @@ def patch_asar(retry: bool = True) -> tuple[bool, str]:
     if done == len(jobs):
         return True, "wordmark already patched"
 
-    # A bundle that is still fully shipped is the only valid restore source; a
-    # partially patched one is never written over a good backup.
+
     if done == 0:
         try:
             BACKUP.write_bytes(data)
@@ -873,24 +725,10 @@ def patch_asar(retry: bool = True) -> tuple[bool, str]:
 
 
 def _art_signatures():
-    """Byte prefixes unique to this project's art, used to recognise our writes.
-
-    A bundle patched by an older release no longer resolves against the current
-    literal anchors, so the markers have to be searched for outright. The art is
-    deterministic, and each payload lands as one contiguous run, so the head of
-    the run survives even when the whole block sits at the wrong offset.
-    """
     return (build_hero(WORD)[:64], build_flat(WORD)[:64])
 
 
 def _carries_zzz(data: bytes) -> bool:
-    """True when the live bundle still holds bytes this project wrote.
-
-    The old guard compared file sizes, which stopped working the moment the
-    composer toggle repacked the archive. What actually matters is whether the
-    bundle is ours: if a vendor update replaced it, none of these markers survive
-    and restoring would downgrade the app.
-    """
     try:
         json_len = struct.unpack("<I", data[12:16])[0]
         index = json.loads(data[16:16 + json_len].decode("utf-8"))
@@ -921,7 +759,6 @@ def _carries_zzz(data: bytes) -> bool:
 
 
 def restore_asar() -> tuple[bool, str]:
-    """Put the vendor wordmark back from the pristine backup."""
     if not ASAR.is_file():
         return False, "desktop bundle not installed"
     if not BACKUP.is_file():
@@ -938,9 +775,6 @@ def restore_asar() -> tuple[bool, str]:
     except OSError as exc:
         return False, "restore write failed: %s" % str(exc)[:64]
     return True, "vendor wordmark restored"
-
-
-# ----------------------------------------------------------------------- cli
 
 
 def main(argv):

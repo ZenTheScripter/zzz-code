@@ -1,5 +1,3 @@
-"""Zen Lane for Windows: launches opencode through an ephemeral WARP IPv6-pinned proxy."""
-
 from __future__ import annotations
 
 import os
@@ -53,9 +51,8 @@ def _should_add_standalone(args: list[str]) -> bool:
 
 
 def _ensure_warp_up() -> str | None:
-    """Bring the tunnel up for a launch and return the local WARP /64."""
     if not warp_allowed():
-        return None  # cold start: the tunnel opens only inside a session
+        return None
 
     v6 = get_warp_local_v6()
     if v6:
@@ -65,15 +62,12 @@ def _ensure_warp_up() -> str | None:
     if not warp:
         return None
 
-    # A cold machine has the WARP service on demand start, so a launch has to
-    # bring the service back up before warp-cli can dial the tunnel.
+
     warp_service_start()
     run_warp(["mode", "warp"], warp_bin=warp)
     run_warp(["connect"], warp_bin=warp)
-    # A daemon that was just woken has to read its registration and pick an edge
-    # before the interface gets an address; 10 s is enough for a warm service and
-    # too tight for a cold one, and the connect itself is fire-and-forget, so it
-    # is re-sent once half way through instead of assuming it landed.
+
+
     for attempt in range(20):
         time.sleep(1.0)
         v6 = get_warp_local_v6()
@@ -85,7 +79,6 @@ def _ensure_warp_up() -> str | None:
 
 
 def _ensure_tunnel_up() -> bool:
-    """Ensure the selected upstream lane is reachable, repairing WARP once."""
     mode = "warp"
     scope = "tun" if sys.platform == "win32" else "isolated"
     try:
@@ -101,7 +94,7 @@ def _ensure_tunnel_up() -> bool:
         return True
 
     if not warp_allowed():
-        return True  # cold start: never dial the tunnel outside a session
+        return True
 
     def _ready() -> bool:
         if scope == "isolated":
@@ -117,16 +110,15 @@ def _ensure_tunnel_up() -> bool:
 
     warp = find_warp_cli()
     if not warp:
-        return True  # zen-proxy provides dual-stack fallback
+        return True
 
     is_strict = os.environ.get("OUC_STRICT_PROXY") == "1" or (
         LANE_DIR / "strict_proxy.flag"
     ).is_file()
     if not is_strict:
-        return True  # zen-proxy keeps requests working via fallback
+        return True
 
-    # Strict mode would return a 503 if the tunnel is down, so attempt the
-    # same non-destructive repair the keeper uses before giving up.
+
     if not warp_registration_healthy(warp):
         repair_warp_registration(warp, 2)
     try:
@@ -159,7 +151,7 @@ def main() -> int:
         target = find_opencode_cli()
         if not target:
             print(
-                "opencode CLI binary not found — set OUC_REAL_BIN or reinstall OpenCode.",
+                "opencode CLI binary not found - set OUC_REAL_BIN or reinstall OpenCode.",
                 file=sys.stderr,
             )
             return 1

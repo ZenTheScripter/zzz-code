@@ -1,16 +1,3 @@
-#!/usr/bin/env python3
-"""
-patch_opencode.py -- stage the patched runtime under %LOCALAPPDATA%\\ZzZCode.
-
-Thin CLI over `zzz_patch`. Run from anywhere; it never touches the original
-binary: it copies opencode.exe into the staging folder, patches that copy, and
-renames it to zzzcode.exe.
-
-    python patch_opencode.py                 # opencode.exe -> the staged zzzcode.exe
-    python patch_opencode.py --check         # report only, no write
-    python patch_opencode.py --src X --out Y
-"""
-
 from __future__ import annotations
 
 import argparse

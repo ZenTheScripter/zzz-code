@@ -19,7 +19,7 @@ A modified OpenCode desktop client for Windows, kept by **ZenZenitoZeno**.
 `ZzZCode.exe` is a console launcher that stages and runs a private copy of the
 OpenCode runtime, keeps a Cloudflare WARP tunnel pinned so the client stops reaching
 the provider over your home address, and repaints the desktop app's interface for the
-duration of a session — restoring everything it touched the moment you close it.
+duration of a session - restoring everything it touched the moment you close it.
 
 The vendor install is never the thing that gets modified. The launcher copies the
 runtime into its own working directory, works on that copy, and leaves the original
@@ -43,7 +43,7 @@ server that is not the upstream release feed you explicitly enable.
 
 ## Install
 
-1. Download `ZzZCode.exe` and run it. Nothing to install first — WARP and the WebView2
+1. Download `ZzZCode.exe` and run it. Nothing to install first - WARP and the WebView2
    runtime are pulled in through `winget` if the machine has never had them.
 2. Choose **`4` Repair patch** once, or let the first launch do it: that stages the
    runtime, sets up the two background workers, wires the desktop app, and puts
@@ -51,7 +51,7 @@ server that is not the upstream release feed you explicitly enable.
 3. Back at the menu, **`1` Launch ZzZ Code** → desktop or CLI.
 
 Keep the folder together if you want the sources beside the exe. The exe alone works
-too — the Python modules are frozen inside it.
+too - the Python modules are frozen inside it.
 
 ## The console menu
 
@@ -98,16 +98,16 @@ disappear cleanly when the session ends.
 
 **ZzZ Code**
 
-- Abliterated — fetches the instruction sheet from this repository and drops it into
+- Abliterated - fetches the instruction sheet from this repository and drops it into
   every folder OpenCode has open. Off by default; nothing is injected until you ask.
-- Updates — the feed is this repository. The switch is off until you turn it on.
-- Diagnostics — version, bundle, Python, bridge port, runtime version, desktop state,
+- Updates - the feed is this repository. The switch is off until you turn it on.
+- Diagnostics - version, bundle, Python, bridge port, runtime version, desktop state,
   theme count, worker state, `AGENTS.md` location. `Copy report` puts the whole thing
   on the clipboard as flat `key: value` lines, ready for a bug report. `Crash log`
   opens it, `Clear log` empties it.
-- Runtime — `Verify stack` reads WARP, the keeper port and the guard without repairing
+- Runtime - `Verify stack` reads WARP, the keeper port and the guard without repairing
   anything; `Restart keeper` stops and starts both workers in order.
-- Templates — twelve snippets you can append to a project's `AGENTS.md`, or copy to the
+- Templates - twelve snippets you can append to a project's `AGENTS.md`, or copy to the
   clipboard. The append is idempotent per heading, so clicking twice does not duplicate.
 - A small community link at the bottom. It is a link, it opens in your browser, and it
   does not reappear anywhere else in the window.
@@ -196,8 +196,8 @@ Output: `dist/ZzZCode.exe`, console subsystem, no external runtime. See `BUILD.m
 the flags and what the spec collects.
 
 The tree is flat on purpose: every module sits next to the launcher, `ui/` holds the
-Control Center page, `assets/` holds the icon, `jailbreaks/` holds the instruction
-sheet. Nothing nested, nothing hidden — you can read the whole thing.
+Control Center page, `jailbreaks/` holds the instruction sheet. Nothing nested,
+nothing hidden - you can read the whole thing.
 
 ## Layout
 
@@ -214,7 +214,6 @@ tor_manager.py     portable Tor daemon
 ouc_common.py      shared helpers
 doctor.py          diagnostics
 ui/                Control Center HTML
-assets/            icon
 jailbreaks/        the instruction sheet, fetched at runtime
 THEMES.md          every palette and what it is aiming for
 CREDITS.md         upstream attribution and what this fork changes
@@ -275,7 +274,7 @@ them. The upstream `LICENSE` is preserved unmodified; the attribution is in
 `CREDITS.md` and it stays there.
 
 **4. You are responsible for where you point it.** The launcher provides networking
-controls — tunnels, egress routes, a kill-switch, portable Tor. Those are ordinary
+controls - tunnels, egress routes, a kill-switch, portable Tor. Those are ordinary
 systems administration tools, and they are provided so their behaviour can be studied.
 What you route through them, on which network, under which terms of service, is your
 decision and your liability, not the author's. Do not use this to evade a network policy
@@ -283,7 +282,7 @@ you are bound by.
 
 **5. The instruction-sheet feature is an opt-in.** Nothing is injected into your
 projects until you explicitly ask for it, with the switch or with `j`. If you enable it,
-read what it writes before you work next to it — the point of publishing the sheet in
+read what it writes before you work next to it - the point of publishing the sheet in
 this repository is that you can read it first.
 
 **6. Privacy.** The launcher writes nothing that leaves the machine. The one outbound
@@ -307,8 +306,8 @@ upstream project.
 GPL-3.0, same as the upstream this was derived from. `LICENSE` is the original file,
 byte for byte, with the upstream notice untouched. `CREDITS.md` names who built the
 stack this fork started from and lists every change made on top of it. The credit stays
-in the repository — that is how the licence works.
+in the repository - that is how the licence works.
 
 Everything else in here is mine.
 
-— **ZenZenitoZeno**
+- **ZenZenitoZeno**

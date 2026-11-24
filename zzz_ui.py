@@ -1,5 +1,3 @@
-"""Opencode Unlimited — Control Center GUI (Made by ZzZ)."""
-
 from __future__ import annotations
 
 import ctypes
@@ -19,10 +17,10 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-# Support frozen PyInstaller bundle as well as direct execution from windows/
+
 def _bundle_dir() -> Path:
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
+        return Path(sys._MEIPASS)
     return Path(__file__).resolve().parent
 
 
@@ -30,10 +28,10 @@ _BUNDLE = _bundle_dir()
 if str(_BUNDLE) not in sys.path:
     sys.path.insert(0, str(_BUNDLE))
 
-try:  # the Control Center is optional; the console launcher never needs it
+try:
     import psutil
     import webview
-except ImportError:  # pragma: no cover - GUI extras not installed
+except ImportError:
     psutil = None
     webview = None
 
@@ -74,7 +72,7 @@ from ouc_common import (
 )
 from ouc_firewall import install_killswitch, is_killswitch_installed, remove_killswitch
 
-WINDOW_TITLE = "Opencode Unlimited v3.0 — Made by ZzZ"
+WINDOW_TITLE = "ZzZ Code Control Center"
 DETACHED_PROCESS = 0x00000008
 _WORKER_FILES = (
     "ouc_common.py",
@@ -98,16 +96,15 @@ _SERVICE_ENV_KEYS = (
     "NO_PROXY",
     "no_proxy",
 )
-# A real request through the local proxy is the only check that proves traffic
-# gets in and out; a listening port alone can hide a dead tunnel.
+
+
 PROBE_URL = "https://opencode.ai/"
 PROBE_DIRECT_URL = "https://cloudflare.com/cdn-cgi/trace"
 PROBE_EVERY = 120.0
 PROBE_TIMEOUT = 8.0
 HEARTBEAT_STALE = 240.0
 
-# Auto-repair only touches connectivity, never the user's selected route or
-# OpenCode itself. Cooldowns keep a permanent outage from becoming a loop.
+
 AUTO_REPAIR_FILE = LANE_DIR / "auto_repair.json"
 AUTO_REPAIR_LOG = LANE_DIR / "auto_repair.log"
 AUTO_REPAIR_TICK = 25.0
@@ -122,7 +119,6 @@ AUTO_REPAIR_COOLDOWNS = {
 
 
 def _enable_dark_titlebar() -> None:
-    """Apply native Windows 10/11 dark mode to the PyWebView window frame."""
     try:
         hwnd = ctypes.windll.user32.FindWindowW(None, WINDOW_TITLE)
         if not hwnd:
@@ -150,7 +146,6 @@ def _is_mutex_held(name: str) -> bool:
 
 
 def clear_opencode_free_limit() -> int:
-    """Delete client-side free-limit and go-upsell lockout rows from drafts.sqlite."""
     try:
         from auto_resume import clear_opencode_free_limit as clear
 
@@ -168,19 +163,13 @@ def _task_exists(task_name: str) -> bool:
 
 
 def _task_xml_enabled(xml: str) -> bool:
-    """Parse a task XML export; enabled tasks omit the Enabled element."""
-    # schtasks writes UTF-16, which run_hidden may decode as single-byte text.
-    # Removing NULs recovers the ASCII XML we need on every Windows locale.
+
+
     text = (xml or "").replace("\x00", "")
     return not re.search(r"<enabled>\s*false\s*</enabled>", text, re.IGNORECASE)
 
 
 def _task_enabled(task_name: str) -> bool:
-    """True only for an existing, enabled logon task.
-
-    Auto-repair uses this so a worker the user deliberately turned off is
-    never restarted behind their back.
-    """
     try:
         res = run_hidden(["schtasks", "/Query", "/TN", task_name, "/XML"], timeout=5.0)
         return res.returncode == 0 and _task_xml_enabled(res.stdout or "")
@@ -197,7 +186,6 @@ def _port_open(port: int) -> bool:
 
 
 def _heartbeat_age(path: Path) -> float | None:
-    """Seconds since the worker last wrote its heartbeat, or None if it never did."""
     try:
         return max(0.0, time.time() - path.stat().st_mtime)
     except OSError:
@@ -205,12 +193,6 @@ def _heartbeat_age(path: Path) -> float | None:
 
 
 def _probe_http(url: str, proxy: str | None, timeout: float = PROBE_TIMEOUT) -> tuple[bool, str]:
-    """Make one real HTTPS request. Returns (reached, stage).
-
-    Any HTTP answer (even 403/429) proves DNS, TCP, TLS and the tunnel work;
-    only transport errors count as failures. Stage is one of: ok, proxy,
-    timeout, upstream.
-    """
     handlers = [urllib.request.ProxyHandler({"http": proxy, "https": proxy} if proxy else {})]
     opener = urllib.request.build_opener(*handlers)
     req = urllib.request.Request(
@@ -256,10 +238,6 @@ def _tail_lines(path: Path, count: int = 75) -> list[str]:
         return []
 
 
-# EPIPE is deliberately absent: OpenCode reports a closed stdout/stderr pipe as
-# "Error: EPIPE: broken pipe, write" with role=cli, which is local and must not
-# raise the network banner. Upstream write failures still carry fetch failed,
-# UND_ERR_*, or ECONNRESET.
 _NET_ERROR_RE = re.compile(
     r"ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENETUNREACH|"
     r"EHOSTUNREACH|ENOTFOUND|EAI_AGAIN|CF_HAPPY_EYEBALLS|UND_ERR_|"
@@ -274,11 +252,6 @@ _LOG_TS_RE = re.compile(r"^timestamp=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})")
 
 
 def _recent_network_errors(lines: list[str], max_age: float = 600.0) -> list[str]:
-    """Upstream connection failures OpenCode logged in the last few minutes.
-
-    OpenCode's own ``http.status=503`` replies are not upstream failures, so
-    the match list is limited to transport errors and provider 503s.
-    """
     cutoff = time.time() - max_age
     found: list[str] = []
     for line in lines:
@@ -336,12 +309,6 @@ def _find_pythonw() -> str | None:
 
 
 def _write_cmd_wrapper(path: Path, content: str) -> None:
-    """Write a .cmd shim, switching to UTF-8 when a path holds non-ASCII text.
-
-    cmd.exe reads batch files in the active console code page, so a UTF-8 shim
-    needs ``chcp 65001`` before the first non-ASCII line. ASCII shims keep the
-    plain fast path and leave the console code page alone.
-    """
     try:
         path.write_bytes(content.encode("ascii"))
         return
@@ -403,7 +370,6 @@ def _deploy_scripts_and_shims() -> dict[str, str]:
 
 
 def _stop_worker_processes(name: str) -> tuple[int, str]:
-    """Stop the running keeper/guard process without touching tasks or service settings."""
     script_name = "warp_keeper.py" if name == "keeper" else "zen_guard.py"
     me = os.getpid()
     targets = []
@@ -471,7 +437,6 @@ def _user_path_has_bin() -> bool:
 
 
 class ZzZControlApi:
-    """Backend controller exposed to the ZzZ WebView2 UI."""
 
     def __init__(self) -> None:
         ensure_dirs()
@@ -513,7 +478,7 @@ class ZzZControlApi:
             pass
 
     def _auto_repair_loop(self) -> None:
-        # Let startup checks settle before watching; the first pass is cheap.
+
         time.sleep(20.0)
         while True:
             try:
@@ -535,7 +500,7 @@ class ZzZControlApi:
                 return
 
         if self._action_lock.locked():
-            return  # a user action or rotation is running
+            return
 
         state = self.get_state()
         services = state["services"]
@@ -638,8 +603,8 @@ class ZzZControlApi:
             try:
                 conn, mode, raw = warp_status(wb)
                 raw_lower = raw.lower()
-                # Only auto-heal on an explicit handshake MITM or cryptographic failure.
-                # A disconnected startup state alone does not justify deleting the registration.
+
+
                 if ("mitm" in raw_lower) or ("cf_happy_eyeballs" in raw_lower):
                     self.repair_warp_connection()
             except Exception:
@@ -676,11 +641,10 @@ class ZzZControlApi:
         threading.Thread(target=_run, daemon=True).start()
 
     def _refresh_probe_async(self, force: bool = False) -> None:
-        """Ask opencode.ai through the local proxy whether traffic really gets in and out."""
         with self._probe_lock:
             if self._probe_checking:
                 return
-            # After a failure retry sooner (30 s), but don't hammer while the tunnel is fine (120 s).
+
             limit = 30.0 if self._probe.get("ok") is False else PROBE_EVERY
             if not force and (time.time() - self._probe_ts) < limit:
                 return
@@ -690,7 +654,7 @@ class ZzZControlApi:
             started = time.time()
             code = "unknown"
             try:
-                # On startup the keeper may still be binding the port: give it a few seconds.
+
                 for _ in range(24):
                     if _port_open(SERVICE_PROXY_PORT):
                         break
@@ -747,8 +711,8 @@ class ZzZControlApi:
             else:
                 self._refresh_egress_async(force=force_egress)
         else:
-            # Tor and custom routes have their own exit addresses; keep the
-            # display fresh after guard-side circuit/node rotation as well.
+
+
             self._refresh_egress_async(force=force_egress)
 
         with self._egress_lock:
@@ -914,7 +878,6 @@ class ZzZControlApi:
         proxy: dict | None = None,
         net_errors: list[str] | None = None,
     ) -> dict:
-        """Summarise the live state as a short list of plain-language problems with one-click fixes."""
         issues: list[dict] = []
         proxy = proxy or {}
         net_errors = net_errors or []
@@ -934,7 +897,7 @@ class ZzZControlApi:
         if installed and (desktop_installed or cli_installed) and not svc_wired and not path_wired:
             add(
                 "warn",
-                "OpenCode isn't using Opencode Unlimited",
+                "OpenCode is not using the ZzZ Code lane",
                 "OpenCode is installed but it's connecting directly, so it will hit the free limit and nothing "
                 "will rotate. Press Connect, then reopen OpenCode.",
                 "connect_opencode",
@@ -1136,7 +1099,6 @@ class ZzZControlApi:
         return {"status": status, "title": title, "sub": sub, "issues": issues}
 
     def fix_issue(self, action: str) -> dict:
-        """One-click fixes for the problems listed in the health panel."""
         if action == "start_keeper":
             res = self.toggle_worker("keeper", True)
             for _ in range(20):
@@ -1183,7 +1145,6 @@ class ZzZControlApi:
         return {"ok": False, "message": "Unknown fix."}
 
     def fix_everything(self) -> dict:
-        """Run every one-click fix the health check suggests, most serious first."""
         order = [
             "install",
             "connect_opencode",
@@ -1231,7 +1192,6 @@ class ZzZControlApi:
         return {"ok": False, "message": " ".join(parts), "fixed": done, "remaining": left + manual}
 
     def restart_workers(self) -> dict:
-        """Restart the keeper and guard with the code currently deployed, without changing service wiring."""
         if not self._action_lock.acquire(blocking=False):
             return {"ok": False, "message": "Another rotation or setup action is already running."}
         try:
@@ -1444,7 +1404,7 @@ class ZzZControlApi:
                     "message": f"WARP connected ({'App-Only proxy' if scope == 'isolated' else 'Full TUN'}).",
                 }
 
-        # Renew the session keys once; the endpoint and registration stay intact.
+
         run_warp(["tunnel", "rotate-keys"], warp_bin=warp)
         run_warp(["connect"], warp_bin=warp)
         for _ in range(8):
@@ -1514,18 +1474,18 @@ class ZzZControlApi:
                     previous=old_v6,
                 )
             if not new_v6:
-                return {"ok": False, "message": "Rotation failed — keeper will retry automatically."}
+                return {"ok": False, "message": "Rotation failed - keeper will retry automatically."}
             with self._egress_lock:
                 self._egress_v6 = new_v6
                 self._last_egress_ts = time.time()
-            # Trigger edge re-roll on persistent proxy
+
             if (LANE_DIR / "edge_override.txt").is_file():
                 ov = (LANE_DIR / "edge_override.txt").read_text(encoding="utf-8").strip().lower()
             else:
                 ov = "auto"
             if ov == "auto":
                 (LANE_DIR / "edge_reroll").write_text(str(time.time()), encoding="utf-8")
-            # Record hop in state.json
+
             if GUARD_STATE_FILE.is_file():
                 try:
                     st = json.loads(GUARD_STATE_FILE.read_text(encoding="utf-8"))
@@ -1536,7 +1496,7 @@ class ZzZControlApi:
             st["hops"] = int(st.get("hops", 0) or 0) + 1
             st["last_hop"] = int(time.time())
             st["current"] = new_v6
-            # A manual rotation is an explicit request to try again now.
+
             st["failed_hops"] = 0
             st["backoff_until"] = 0
             st["hop_counted"] = 0
@@ -1555,8 +1515,8 @@ class ZzZControlApi:
         worker_flag = name
 
         if not enable:
-            # Disable the logon task first so its restart-on-failure policy
-            # cannot bring the worker back after the kill below.
+
+
             if _task_exists(task_name):
                 run_hidden(
                     ["schtasks", "/Change", "/TN", task_name, "/DISABLE"], timeout=8.0
@@ -1607,7 +1567,7 @@ class ZzZControlApi:
         proxy_url = f"http://127.0.0.1:{SERVICE_PROXY_PORT}"
         cfg_file = Path.home() / ".config" / "opencode" / "service.json"
 
-        # 1. If enabling, make sure the keeper is up to host the lane proxy
+
         if enable:
             if not _port_open(SERVICE_PROXY_PORT):
                 self.toggle_worker("keeper", True)
@@ -1618,8 +1578,7 @@ class ZzZControlApi:
             if not _port_open(SERVICE_PROXY_PORT):
                 return {"ok": False, "message": f"Proxy port {SERVICE_PROXY_PORT} is not listening. Check WARP Keeper."}
 
-        # 2. Update service.json directly so unrelated keys such as the
-        #    service password are preserved.
+
         try:
             cfg = {}
             if cfg_file.is_file():
@@ -1646,7 +1605,7 @@ class ZzZControlApi:
         except Exception as exc:
             return {"ok": False, "message": f"Failed updating service.json: {exc}"}
 
-        # 3. Ask the OpenCode CLI to apply the same settings and restart.
+
         oc = find_opencode_cli()
         if oc:
             try:
@@ -1795,7 +1754,6 @@ class ZzZControlApi:
             return {"ok": False, "message": f"Auto-heal failed: {exc}"}
 
     def repair_warp_connection(self) -> dict:
-        """Renew the WARP session without deleting a healthy registration."""
         wb = find_warp_cli()
         if not wb:
             return {"ok": False, "message": "warp-cli.exe not found."}
@@ -1884,12 +1842,11 @@ class ZzZControlApi:
         return {"ok": True, "pool": pool, "message": f"Found {len(pool)} live opencode.ai IPv6 edges."}
 
     def deep_reset_identity(self) -> dict:
-        """Deep clean transient caches & rotate network identity without touching user chats/sessions."""
         import shutil, tempfile
 
         cleared: list[str] = []
 
-        # Clear transient client caches only (never touch opencode.db or user chat sessions!)
+
         base_dir = Path.home() / ".local" / "share" / "opencode"
         if base_dir.is_dir():
             for item_name in ("olliecode-fingerprint.json",):
@@ -1914,12 +1871,12 @@ class ZzZControlApi:
                 except Exception:
                     pass
 
-        # Clear client-side rate limit lockouts from drafts.sqlite
+
         fl_cleared = clear_opencode_free_limit()
         if fl_cleared > 0:
             cleared.append(f"{fl_cleared} limit entries")
 
-        # Clear guard blacklist and reset edge override
+
         self.clear_blacklist()
         self.set_edge_override("auto")
 
@@ -1968,7 +1925,7 @@ class ZzZControlApi:
         if not desktop:
             return {"ok": False, "message": "OpenCode.exe Desktop app not found."}
 
-        # Clear any client-side rate limit lockouts
+
         clear_opencode_free_limit()
 
         if not _port_open(SERVICE_PROXY_PORT):
@@ -2008,7 +1965,6 @@ class ZzZControlApi:
         return {"ok": True, "message": "Launched OpenCode Desktop through WARP IPv6 lane."}
 
     def fix_opencode_service(self) -> dict:
-        """Restart the OpenCode background service without killing the Desktop app."""
         cli = find_opencode_cli()
         if not cli:
             return {
@@ -2082,7 +2038,7 @@ class ZzZControlApi:
             subprocess.Popen([wt, "cmd.exe", "/k", str(shim)], close_fds=use_close_fds)
         else:
             subprocess.Popen(
-                ["cmd.exe", "/c", "start", "OpenCode Unlimited CLI", "cmd.exe", "/k", str(shim)],
+                ["cmd.exe", "/c", "start", "ZzZ Code CLI", "cmd.exe", "/k", str(shim)],
                 shell=False,
                 close_fds=use_close_fds,
             )
@@ -2132,7 +2088,7 @@ class ZzZControlApi:
 
     def open_logs_folder(self) -> dict:
         ensure_dirs()
-        os.startfile(str(DEST_DIR))  # type: ignore[attr-defined]
+        os.startfile(str(DEST_DIR))
         return {"ok": True, "message": f"Opened {DEST_DIR}"}
 
     def copy_text(self, text: str) -> dict:
@@ -2190,7 +2146,6 @@ def _run_cli_mode(argv: list[str]) -> int | None:
 
 
 def _is_webview2_available() -> bool:
-    """Check registry for installed Microsoft Edge WebView2 Runtime or Edge Canary/Beta/Dev."""
     try:
         import winreg
         keys = (
@@ -2215,13 +2170,12 @@ def _is_webview2_available() -> bool:
 
 
 def _prompt_webview2_install() -> None:
-    """Prompt user to download official Microsoft Edge WebView2 runtime if missing."""
     import webbrowser
     MB_YESNO = 0x00000004
     MB_ICONEXCLAMATION = 0x00000030
     IDYES = 6
     msg = (
-        "Microsoft Edge WebView2 Runtime is required to run the Opencode Unlimited UI.\n\n"
+        "Microsoft Edge WebView2 Runtime is required to run the ZzZ Code Control Center.\n\n"
         "It was not detected on this Windows installation (this commonly occurs on "
         "older Windows 10 versions or stripped/lite/gaming Windows editions).\n\n"
         "Would you like to open the official Microsoft WebView2 installer download page now?"
@@ -2229,7 +2183,7 @@ def _prompt_webview2_install() -> None:
     ans = ctypes.windll.user32.MessageBoxW(
         None,
         msg,
-        "Opencode Unlimited — WebView2 Required",
+        "ZzZ Code - WebView2 Required",
         MB_YESNO | MB_ICONEXCLAMATION,
     )
     if ans == IDYES:
@@ -2237,7 +2191,6 @@ def _prompt_webview2_install() -> None:
 
 
 def _load_ui_html() -> str:
-    """Load index.html from bundle or adjacent filesystem paths."""
     candidates = (
         _BUNDLE / "src" / "ui" / "index.html",
         _BUNDLE / "windows" / "ui" / "index.html",
@@ -2259,7 +2212,6 @@ def _load_ui_html() -> str:
 
 
 def _log_startup_error(exc: Exception) -> None:
-    """Log startup exceptions to disk and present an informative dialog."""
     import traceback
     err_text = traceback.format_exc()
     try:
@@ -2272,9 +2224,9 @@ def _log_startup_error(exc: Exception) -> None:
     MB_ICONERROR = 0x00000010
     ctypes.windll.user32.MessageBoxW(
         None,
-        f"Failed to initialize Opencode Unlimited UI:\n\n{exc}\n\n"
+        f"Failed to initialize the ZzZ Code Control Center:\n\n{exc}\n\n"
         f"Details have been written to:\n{DEST_DIR}\\logs\\zzz_ui_error.log",
-        "Opencode Unlimited — Startup Error",
+        "ZzZ Code - Startup Error",
         MB_OK | MB_ICONERROR,
     )
 
@@ -2286,7 +2238,7 @@ def main() -> int:
 
     existing = ctypes.windll.user32.FindWindowW(None, WINDOW_TITLE)
     if existing:
-        ctypes.windll.user32.ShowWindow(ctypes.c_void_p(existing), 9)  # SW_RESTORE
+        ctypes.windll.user32.ShowWindow(ctypes.c_void_p(existing), 9)
         ctypes.windll.user32.SetForegroundWindow(ctypes.c_void_p(existing))
         return 0
 
@@ -2341,7 +2293,7 @@ def main() -> int:
     try:
         webview.start(**start_kwargs)
     except TypeError:
-        # pywebview 5.x does not accept an icon argument.
+
         start_kwargs.pop("icon", None)
         try:
             webview.start(**start_kwargs)

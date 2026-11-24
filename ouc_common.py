@@ -1,5 +1,3 @@
-"""Shared paths, process helpers, WARP controls, and IPv6 utilities."""
-
 from __future__ import annotations
 
 import contextlib
@@ -25,7 +23,6 @@ CREATE_NO_WINDOW = 0x08000000
 
 
 def _default_data_root() -> Path:
-    """Return the per-user state root for this platform."""
     if sys.platform == "win32":
         return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
@@ -44,9 +41,8 @@ KEEPER_DIR = DEST_DIR / "keeper"
 LANE_DIR = DEST_DIR / "lane"
 
 PAUSE_FILE = DEST_DIR / "keeper.pause"
-# Cold start policy: while this marker exists the tunnel stays down unless a
-# session marker says a ZzZ launch is holding it open. Written once by the
-# launcher, removed by `warp_autostart_set(True)`.
+
+
 ZZZ_HOME = Path.home() / ".zzzcode"
 WARP_COLD_FILE = ZZZ_HOME / "warp_cold"
 SESSION_FILE = ZZZ_HOME / "session.active"
@@ -66,12 +62,6 @@ _PROXY_PORT_CHOICE: int | None = None
 
 
 def _proxy_port_ready(port: int) -> bool:
-    """True when ``port`` already answers, or can still be bound on loopback.
-
-    A port Windows reserved for another service fails the bind with
-    WSAEACCES (10013) rather than WSAEADDRINUSE, so "in use" is not the same
-    question as "bindable" - this asks the second one.
-    """
     if port <= 0:
         return False
     try:
@@ -88,7 +78,6 @@ def _proxy_port_ready(port: int) -> bool:
 
 
 def _proxy_port_in_use(port: int) -> bool:
-    """True when loopback ``port`` is bound by someone else right now."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             probe.bind(("127.0.0.1", port))
@@ -99,13 +88,6 @@ def _proxy_port_in_use(port: int) -> bool:
 
 
 def service_proxy_port(preferred: int | None = None) -> int:
-    """The loopback port the service proxy can actually use on this machine.
-
-    Probes the remembered choice, then the preferred/default port, then a few
-    fallbacks, then an OS-assigned port. The result is persisted so the
-    launcher, the keeper, the doctor and OpenCode's service env all agree after
-    a restart instead of each assuming OUC_SERVICE_PROXY_PORT was bindable.
-    """
     global _PROXY_PORT_CHOICE
     if preferred is None and _PROXY_PORT_CHOICE:
         return _PROXY_PORT_CHOICE
@@ -123,9 +105,7 @@ def service_proxy_port(preferred: int | None = None) -> int:
         if fallback not in candidates:
             candidates.append(fallback)
 
-    # A remembered port that is owned but not answering is almost always the
-    # previous proxy still closing. Keep it: jumping to a fallback would force
-    # another OpenCode rewire for a port that becomes usable seconds later.
+
     if preferred is None and candidates and _proxy_port_in_use(candidates[0]):
         _PROXY_PORT_CHOICE = candidates[0]
         return candidates[0]
@@ -210,7 +190,6 @@ _IPV6_RE = re.compile(r"\b([0-9a-fA-F:]+:[0-9a-fA-F:]+)\b")
 
 
 def ensure_dirs() -> None:
-    """Create state and log directories if missing."""
     for d in (DEST_DIR, SCRIPTS_DIR, BIN_DIR, GUARD_DIR, KEEPER_DIR, LANE_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -219,7 +198,6 @@ def run_hidden(
     args: list[str],
     timeout: float = 15.0,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess without spawning a visible console window on Windows."""
     kwargs: dict[str, object] = {}
     if sys.platform == "win32":
         kwargs["creationflags"] = CREATE_NO_WINDOW
@@ -233,7 +211,6 @@ def run_hidden(
 
 
 def find_warp_cli() -> str | None:
-    """Locate Cloudflare warp-cli.exe."""
     env_bin = os.environ.get("OUC_WARP_BIN", "").strip()
     if env_bin and Path(env_bin).is_file():
         return env_bin
@@ -247,14 +224,11 @@ def find_warp_cli() -> str | None:
 
 
 def find_opencode_cli() -> str | None:
-    """Locate the OpenCode CLI binary, skipping the Desktop GUI executable."""
     env_bin = os.environ.get("OUC_REAL_BIN", "").strip()
     if env_bin and Path(env_bin).is_file():
         return env_bin
 
-    # The Desktop GUI also runs as OpenCode.exe. Only accept a running
-    # opencode-cli/host CLI process, or an opencode.exe outside the Desktop
-    # installation directory.
+
     try:
         import psutil
         for p in psutil.process_iter(["name", "exe"]):
@@ -275,7 +249,7 @@ def find_opencode_cli() -> str | None:
     except Exception:
         pass
 
-    # Desktop-managed CLI versions live under Roaming\ai.opencode.desktop\cli.
+
     appdata = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
     cli_dir = appdata / "ai.opencode.desktop" / "cli"
     if cli_dir.is_dir():
@@ -307,14 +281,12 @@ def find_opencode_cli() -> str | None:
 
 
 def opencode_command(exe: str, args: list[str]) -> list[str]:
-    """Return an executable argument list that also works for .cmd shims."""
     if exe.lower().endswith((".cmd", ".bat")):
         return [os.environ.get("COMSPEC", "cmd.exe"), "/c", exe, *args]
     return [exe, *args]
 
 
 def find_opencode_service_port() -> int | None:
-    """Return the port of the running OpenCode background service, if any."""
     exe = find_opencode_cli()
     if not exe:
         return None
@@ -330,7 +302,6 @@ def find_opencode_service_port() -> int | None:
 
 
 def find_opencode_desktop() -> str | None:
-    """Locate the OpenCode Desktop GUI executable if installed."""
     try:
         import psutil
         for p in psutil.process_iter(["name", "exe"]):
@@ -403,7 +374,6 @@ def run_warp(
     warp_bin: str | None = None,
     timeout: float = 15.0,
 ) -> tuple[int, str]:
-    """Invoke warp-cli.exe, probing --accept-tos first then falling back."""
     exe = warp_bin or find_warp_cli()
     if not exe:
         return 1, "warp-cli.exe not found"
@@ -429,7 +399,6 @@ def run_warp(
 
 
 def warp_mode(warp_bin: str | None = None) -> str:
-    """Return the current WARP operation mode (warp or proxy)."""
     exe = warp_bin or find_warp_cli() or ""
     now = time.monotonic()
     with _WARP_STATUS_LOCK:
@@ -464,7 +433,6 @@ def warp_mode(warp_bin: str | None = None) -> str:
 
 
 def get_warp_protocol(warp_bin: str | None = None) -> str:
-    """Return current WARP protocol (e.g. 'wireguard' or 'masque') in lowercase."""
     rc, out = run_warp(["-j", "settings"], warp_bin=warp_bin, timeout=5.0)
     if rc == 0 and "{" in out:
         try:
@@ -491,7 +459,6 @@ def get_warp_protocol(warp_bin: str | None = None) -> str:
 
 
 def ensure_warp_protocol(desired: str = "wireguard", warp_bin: str | None = None) -> bool:
-    """Set the WARP tunnel protocol only when it differs from the requested one."""
     want = desired.strip().lower()
     if want not in ("wireguard", "masque"):
         return False
@@ -507,7 +474,6 @@ def ensure_warp_protocol(desired: str = "wireguard", warp_bin: str | None = None
 
 
 def warp_status(warp_bin: str | None = None, force: bool = False) -> tuple[bool, str, str]:
-    """Return (is_connected, mode_name, status_text) for WARP."""
     exe = warp_bin or find_warp_cli() or ""
     now = time.monotonic()
     if not force:
@@ -567,7 +533,6 @@ def warp_status(warp_bin: str | None = None, force: bool = False) -> tuple[bool,
 
 
 def is_cloudflare_v6(addr: str) -> bool:
-    """Return True if IPv6 address belongs to Cloudflare/WARP global ranges."""
     try:
         ip = ipaddress.IPv6Address(addr.split("%", 1)[0])
     except ValueError:
@@ -579,9 +544,8 @@ def is_cloudflare_v6(addr: str) -> bool:
 
 
 def get_warp_local_v6() -> str | None:
-    """Return the active WARP adapter global IPv6 address, or None."""
-    # Adapter names are localized on some Windows installs; match the
-    # interface by its owner (Cloudflare/WARP) instead of a fixed label.
+
+
     try:
         import psutil
         for name, addrs in psutil.net_if_addrs().items():
@@ -602,7 +566,7 @@ def get_warp_local_v6() -> str | None:
     except Exception:
         pass
 
-    # Fallback for systems without psutil or with a renamed adapter.
+
     try:
         res = run_hidden(
             ["netsh", "interface", "ipv6", "show", "addresses"],
@@ -635,7 +599,6 @@ _EGRESS_ENDPOINTS = (
 
 
 def _valid_public_ip(text: str) -> str:
-    """Return a normalized public IP address from text, or an empty string."""
     cand = text.strip().split("%", 1)[0]
     if not cand or len(cand) > 64 or any(ch in cand for ch in " <>\"'"):
         return ""
@@ -655,7 +618,6 @@ def _valid_public_ip(text: str) -> str:
 
 
 def _parse_egress_body(text: str) -> str:
-    """Extract an address from ipify output or a Cloudflare trace body."""
     for line in (text or "").splitlines():
         line = line.strip()
         if line.startswith("ip="):
@@ -666,7 +628,6 @@ def _parse_egress_body(text: str) -> str:
 
 
 def _curl_egress(curl: str, proxy: str, ipv6: bool, timeout: float) -> str:
-    """Probe a public IP echo service, optionally through a proxy."""
     for endpoint in _EGRESS_ENDPOINTS:
         args = [curl, "-sS", "--max-time", str(max(2, int(timeout)))]
         if ipv6:
@@ -691,7 +652,6 @@ def _proxy_url(
     username: str = "",
     password: str = "",
 ) -> str:
-    """Build a curl proxy URL, including credentials when configured."""
     from urllib.parse import quote
 
     scheme = "socks5h" if proxy_type.lower().startswith("socks") else "http"
@@ -702,7 +662,6 @@ def _proxy_url(
 
 
 def get_egress_ip(timeout: float = 6.0) -> str:
-    """Return the public egress IP of the active route, or an empty string."""
     mode = "warp"
     scope = "tun" if sys.platform == "win32" else "isolated"
     try:
@@ -762,7 +721,7 @@ def get_egress_ip(timeout: float = 6.0) -> str:
             if found:
                 return found
 
-    # Direct HTTP fallback is only valid for a native WARP tunnel.
+
     if mode in ("warp", "clean") and scope != "isolated":
         for endpoint in _EGRESS_ENDPOINTS:
             try:
@@ -781,7 +740,6 @@ def get_egress_ip(timeout: float = 6.0) -> str:
 
 
 def get_egress_v6(timeout: float = 6.0) -> str:
-    """Return the public IPv6 egress address for WARP, or an empty string."""
     mode = "warp"
     try:
         from proxy_chain import get_egress_config
@@ -803,19 +761,11 @@ def get_egress_v6(timeout: float = 6.0) -> str:
 
 
 def get_public_v6(timeout: float = 6.0) -> str:
-    """Return the public IPv6 address the far side sees, or an empty string.
-
-    The WARP adapter keeps its IPv6 address when the tunnel stops carrying
-    traffic, so the adapter address is not proof that IPv6 works. Rotation must
-    be confirmed with the address observed from outside; otherwise a failed hop
-    looks successful while every request quietly leaves over IPv4.
-    """
     egress = get_egress_ip(timeout=timeout)
     return egress if ":" in egress else ""
 
 
 def normalize_v6_64(addr: str) -> str:
-    """Normalize an IPv6 address to its /64 network prefix string."""
     clean = addr.strip().split("%", 1)[0]
     if not clean or ":" not in clean:
         return ""
@@ -827,7 +777,6 @@ def normalize_v6_64(addr: str) -> str:
 
 
 def is_keeper_paused() -> bool:
-    """Check if zen-guard or zen-hop currently holds a valid pause lock."""
     if not PAUSE_FILE.is_file():
         return False
     try:
@@ -843,7 +792,6 @@ def is_keeper_paused() -> bool:
 
 @contextlib.contextmanager
 def keeper_pause_ctx(reason: str, seconds: int = 180) -> Iterator[None]:
-    """Temporarily pause warp-keeper ticks while rotating WARP registration."""
     ensure_dirs()
     payload = {"until": time.time() + seconds, "reason": reason, "pid": os.getpid()}
     try:
@@ -860,7 +808,6 @@ def keeper_pause_ctx(reason: str, seconds: int = 180) -> Iterator[None]:
 
 
 def acquire_mutex(name: str) -> int | None:
-    """Acquire a named Windows mutex; returns handle if newly owned, else None."""
     kernel32 = ctypes.windll.kernel32
     kernel32.CreateMutexW.restype = ctypes.c_void_p
     handle = kernel32.CreateMutexW(None, False, f"Local\\{name}")
@@ -875,7 +822,6 @@ def acquire_mutex(name: str) -> int | None:
 
 
 def is_admin() -> bool:
-    """Return True if the current process has administrator/root privileges."""
     if sys.platform != "win32":
         try:
             return os.geteuid() == 0
@@ -888,7 +834,6 @@ def is_admin() -> bool:
 
 
 def append_log(path: Path, message: str, max_bytes: int = 1_048_576) -> None:
-    """Append timestamped log line with simple single-backup rotation."""
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         if path.is_file() and path.stat().st_size > max_bytes:
@@ -907,12 +852,6 @@ def append_log(path: Path, message: str, max_bytes: int = 1_048_576) -> None:
 
 
 def fetch_opencode_aaaa_pool(timeout: float = 3.5) -> list[str]:
-    """Gather live IPv6 addresses for opencode.ai via DoH, system DNS, and fallback.
-
-    Three DoH round trips plus two resolver calls: behind a cold tunnel that can
-    run past ten seconds, so callers that paint a page pass a short `timeout` and
-    keep the last known pool instead of stalling the UI.
-    """
     pool: set[str] = set()
 
     for doh_url in (
@@ -956,7 +895,6 @@ def _current_warp_scope() -> str:
 
 
 def ensure_warp_mode(warp_bin: str, scope: str) -> None:
-    """Put warp-cli into the operation mode required by the selected scope."""
     desired = "proxy" if scope == "isolated" else "warp"
     if warp_mode(warp_bin=warp_bin) == desired:
         return
@@ -966,13 +904,11 @@ def ensure_warp_mode(warp_bin: str, scope: str) -> None:
 
 
 def warp_registration_healthy(warp_bin: str) -> bool:
-    """Return True when warp-cli reports an existing device registration."""
     rc, _ = run_warp(["registration", "show"], warp_bin=warp_bin, timeout=8.0)
     return rc == 0
 
 
 def repair_warp_registration(warp_bin: str, max_tries: int = 3) -> bool:
-    """Recreate a broken registration without touching a healthy one."""
     if warp_registration_healthy(warp_bin):
         return True
     for attempt in range(max(1, max_tries)):
@@ -990,7 +926,6 @@ def repair_warp_registration(warp_bin: str, max_tries: int = 3) -> bool:
 def _rotated_egress(
     warp_bin: str, avoid: set[str], timeout: float = 2.5
 ) -> str:
-    """Return the observed IPv6 egress when it is outside every avoided /64."""
     connected, _, _ = warp_status(warp_bin=warp_bin, force=True)
     if not connected:
         return ""
@@ -1007,12 +942,6 @@ def hop_once(
     avoid_prefixes: set[str] | None = None,
     previous: str = "",
 ) -> str:
-    """Rotate the WARP session until an unused public /64 is observed.
-
-    Returns an address whose /64 differs from the previous egress and from
-    every prefix in ``avoid_prefixes``. Returns an empty string when the
-    tunnel cannot produce a fresh block.
-    """
     avoid: set[str] = set()
     for value in avoid_prefixes or ():
         prefix = normalize_v6_64(value)
@@ -1026,9 +955,7 @@ def hop_once(
     ensure_warp_mode(warp_bin, scope)
     ensure_warp_protocol("wireguard", warp_bin=warp_bin)
 
-    # A disconnected tunnel cannot produce a /64. Reconnecting a few times is
-    # fine, but rotate-keys/disconnect/connect in a loop only cuts live
-    # sessions without changing anything.
+
     connected, _, _ = warp_status(warp_bin=warp_bin, force=True)
     if not connected:
         run_warp(["connect"], warp_bin=warp_bin, timeout=15.0)
@@ -1041,8 +968,8 @@ def hop_once(
             return ""
 
     for _rotation in range(3):
-        # rotate-keys keeps the device registration and only renews the
-        # WireGuard session, so Cloudflare assigns a new client /64.
+
+
         run_warp(["tunnel", "rotate-keys"], warp_bin=warp_bin, timeout=15.0)
         run_warp(["disconnect"], warp_bin=warp_bin, timeout=10.0)
         time.sleep(0.8)
@@ -1064,7 +991,6 @@ def hop_once(
 
 
 def port_listening(port: int, host: str = "127.0.0.1", timeout: float = 1.5) -> bool:
-    """Return True when a TCP listener accepts a connection on host:port."""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -1077,13 +1003,6 @@ def probe_proxy(
     host: str = "opencode.ai",
     timeout: float = 12.0,
 ) -> tuple[bool, str]:
-    """Prove the lane proxy carries a real TLS session to `host` and gets an answer.
-
-    A bound port is not a working proxy: the listener can accept and then fail
-    every CONNECT because the edge is dead or the tunnel is down. This walks the
-    whole path - TCP to the proxy, CONNECT to the pinned edge, TLS handshake with
-    certificate validation, one real HTTP request - and reports where it broke.
-    """
     proxy_port = int(port or service_proxy_port())
     try:
         sock = socket.create_connection(("127.0.0.1", proxy_port), timeout=timeout)
@@ -1130,27 +1049,15 @@ def probe_proxy(
             pass
 
 
-# ------------------------------------------------------------ cold start
-#
-# WARP's own service starts at logon and reconnects because the client reports
-# `Always On: true`. The launcher only wants the tunnel while a ZzZ session is
-# open, so the service is switched to demand start, the marker below keeps the
-# keeper from dialling, and a session marker re-enables both for the duration of
-# a launch.
-
-
 def warp_cold() -> bool:
-    """True when the tunnel must stay down outside a ZzZ session."""
     return WARP_COLD_FILE.is_file()
 
 
 def session_active() -> bool:
-    """True while a launcher-launched session holds the tunnel open."""
     return SESSION_FILE.is_file()
 
 
 def warp_allowed() -> bool:
-    """Cold policy + session marker, with an env override for debugging."""
     if os.environ.get("OUC_WARP_COLD", "").strip() == "0":
         return True
     return (not warp_cold()) or session_active()
@@ -1174,7 +1081,6 @@ def set_session_active(enable: bool) -> None:
 
 
 def warp_service_state() -> str:
-    """`running`, `stopped` or `missing` for the Cloudflare WARP service."""
     try:
         res = run_hidden(["sc", "query", WARP_SERVICE], timeout=6.0)
     except Exception:
@@ -1188,7 +1094,6 @@ def warp_service_state() -> str:
 
 
 def warp_service_autostart(enable: bool) -> tuple[bool, str]:
-    """Switch the WARP service between boot start and demand start."""
     mode = "auto" if enable else "demand"
     try:
         res = run_hidden(["sc", "config", WARP_SERVICE, "start=", mode], timeout=8.0)
@@ -1201,11 +1106,6 @@ def warp_service_autostart(enable: bool) -> tuple[bool, str]:
 
 
 def warp_service_start_type() -> int:
-    """Numeric `START_TYPE` from `sc qc`: 2 auto, 3 demand, 4 disabled, 0 unknown.
-
-    The token after the number is localised on some installs, so the digit is the
-    only thing worth reading.
-    """
     try:
         res = run_hidden(["sc", "qc", WARP_SERVICE], timeout=6.0)
     except Exception:
@@ -1228,9 +1128,8 @@ def warp_service_start() -> tuple[bool, str]:
     except Exception as exc:
         return False, "sc start failed: %s" % str(exc)[:48]
     if res.returncode != 0:
-        # 5 is ERROR_ACCESS_DENIED: the cold policy parked the service on demand
-        # and the interactive user was never granted start rights. Reporting the
-        # real reason here is what lets the caller decide to elevate once.
+
+
         blob = (res.stdout or "") + (res.stderr or "")
         if res.returncode == 5 or "refus" in blob.lower() or "denied" in blob.lower():
             return False, "sc start access denied (no user grant)"
@@ -1254,23 +1153,11 @@ def warp_service_stop() -> tuple[bool, str]:
     return False, "WARP service still running (needs admin)"
 
 
-# Interactive users get SERVICE_START / SERVICE_STOP on this one service, once.
-# Without that grant the cold policy and the launcher are incompatible: the
-# service is parked on demand start at every session end, and `sc start` from a
-# normal account is access-denied, so no launch could ever reopen the tunnel.
-# The grant is scoped to CloudflareWARP only; nothing else on the machine moves.
 _GRANT_ACE = "(A;;RPWP;;;IU)"
 _GRANT_DONE = False
 
 
 def warp_grant_user_start() -> tuple[bool, str]:
-    """Allow the interactive user to start/stop CloudflareWARP without UAC.
-
-    Idempotent: the SDDL is read back, the ACE is only appended when missing,
-    and the DACL is written in the same form it was read so nothing else in the
-    descriptor changes. Needs admin once; after that a cold start is a normal
-    user-level operation.
-    """
     global _GRANT_DONE
     if _GRANT_DONE:
         return True, "grant cached"
@@ -1287,8 +1174,7 @@ def warp_grant_user_start() -> tuple[bool, str]:
         _GRANT_DONE = True
         return True, "user start already granted"
 
-    # DACL entries end where the SACL begins; the grant goes at the end of the
-    # DACL so it cannot disturb the owner, group or audit sections.
+
     head, sep, tail = sddl.partition("S:")
     new = head + _GRANT_ACE + (sep + tail if sep else "")
     try:

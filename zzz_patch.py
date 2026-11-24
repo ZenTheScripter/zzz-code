@@ -1,30 +1,3 @@
-#!/usr/bin/env python3
-"""
-ZzZ Code -- opencode.exe rebrand engine.
-
-bun standalone executables carry an index of module byte-offsets in their
-trailer. Any byte inserted or removed invalidates every offset after the edit,
-so the process is length-preserving: each rewritten blob is padded back to its
-exact original byte length. Padding is ASCII space inserted immediately after
-the `var X=` token -- legal JS whitespace that never reaches the rendered art.
-
-Two bundle layouts are supported, probed in order:
-
-  v1  `var _={left:[...],right:[...]}`   splash wordmark      (ZZZ + code)
-      `var O=[...]`                      CLI brailled banner  (ZZZCODE)
-
-  v2  `var cw={left:[...],right:[...]}`  splash wordmark      (ZZZ + code)
-      -- the brailled banner was dropped upstream in the 2.x line
-
-The v2 art is emitted as literal UTF-8 block characters rather than `\\uXXXX`
-escapes: the v2 span is 590 bytes, and escaping every glyph would overflow it.
-
-Public API:
-    patch_binary(src, dst) -> PatchReport
-    patch_in_place(path)   -> PatchReport
-    is_patched(path) -> bool
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -49,7 +22,7 @@ V2_LOGO_TAIL = ",Z$={left:["
 
 
 class PatchError(RuntimeError):
-    """Target binary does not match the expected bundle layout."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -65,15 +38,6 @@ class PatchReport:
     banner_pad: int
 
 
-# ---------------------------------------------------------------- art ------
-
-# 4-wide, 3-row glyph in the same family as the shipped block font. Expanded to
-# half-cell pixels it reads:
-#     ####
-#     ...#
-#     ..#.
-#     .#..
-#     ####
 Z = [UPPER * 3 + FULL, " " + LOWER + UPPER + " ", UPPER * 4]
 
 C = [FULL + UPPER * 3, FULL + "_" * 3, UPPER * 4]
@@ -102,19 +66,16 @@ BANNER_ART = [
     " ".join([Z[2]] * 3 + [C[2], O[2], D[2], E[2]]),
 ]
 
-# v2 lays the splash out as two 19-column blocks side by side, so the left one
-# has to be padded to the same width or the right block shifts under it.
+
 V2_LEFT = [LEFT_ART[0]] + [row.ljust(19) for row in LEFT_ART[1:]]
 V2_RIGHT = RIGHT_ART
 
 
 def _esc(text: str) -> str:
-    """Escape non-ASCII as \\uXXXX, matching the v1 bundle's encoding."""
     return "".join(c if ord(c) < 0x80 else "\\u%04x" % ord(c) for c in text)
 
 
 def _lit(text: str) -> str:
-    """Escape only what a JS string literal cannot carry; keep glyphs as UTF-8."""
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
@@ -140,8 +101,6 @@ def v2_logo_blob() -> str:
 def banner_blob() -> str:
     return "var O=%s" % _jarray(BANNER_ART)
 
-
-# ------------------------------------------------------------ patching -----
 
 def _count(data: bytes, needle: bytes) -> int:
     return data.count(needle)
@@ -170,8 +129,8 @@ def _rewrite(
     start, end = _find_span(bytes(data), locator, terminator)
     original_len = end - start
     body = blob[len(anchor):]
-    # Padding goes between the `var X=` token and the object: plain whitespace,
-    # invisible to the renderer, keeps every following module offset intact.
+
+
     pad = original_len - len(anchor.encode("ascii")) - len(body.encode("utf-8")) \
         - len(tail.encode("utf-8"))
     if pad < 0:
@@ -187,7 +146,6 @@ def _rewrite(
 
 
 def is_patched(path: Path) -> bool:
-    """True when the wordmark already reads ZZZ (idempotent re-run guard)."""
     markers = [
         (_esc(Z[0]) + " " + _esc(Z[0])).encode("ascii"),
         (Z[0] + " " + Z[0]).encode("utf-8"),
@@ -211,12 +169,6 @@ def is_patched(path: Path) -> bool:
 
 
 def _apply(data: bytearray) -> tuple[str, int, int, int, int]:
-    """Rewrite the wordmark blobs inside `data`, length-preserving.
-
-    The profile is picked by probing the bundle, not by version string: a build
-    either carries the v1 pair of blobs or the v2 splash, and the locator count
-    says which before anything is written.
-    """
     v1_logo = _count(bytes(data), V1_LOGO_LOCATOR) == 1
     v2_logo = _count(bytes(data), V2_LOGO_LOCATOR) == 1
 
@@ -247,7 +199,6 @@ def _apply(data: bytearray) -> tuple[str, int, int, int, int]:
 
 
 def patch_binary(source: Path, output: Path) -> PatchReport:
-    """Copy `source` to `output` and rewrite the wordmark blobs in place."""
     source = Path(source)
     output = Path(output)
     if not source.is_file():
@@ -281,12 +232,6 @@ def patch_binary(source: Path, output: Path) -> PatchReport:
 
 
 def patch_in_place(path: Path) -> PatchReport:
-    """Rewrite an already-placed copy of the runtime, without moving it again.
-
-    The launcher stages `opencode.exe`, patches that staged file, and only then
-    renames it to `zzzcode.exe` so a half-written binary never carries the name
-    the launcher trusts.
-    """
     path = Path(path)
     if not path.is_file():
         raise PatchError("target binary missing: %s" % path)

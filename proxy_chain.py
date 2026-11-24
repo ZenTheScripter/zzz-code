@@ -1,5 +1,3 @@
-"""Multi-egress proxy router: supports Cloudflare WARP, Tor Network, and Custom SOCKS5/HTTP."""
-
 from __future__ import annotations
 
 import json
@@ -25,7 +23,6 @@ def get_default_warp_scope() -> str:
 
 
 def get_egress_config() -> dict:
-    """Read the active egress routing configuration."""
     default_scope = get_default_warp_scope()
     if EGRESS_CONFIG_FILE.is_file():
         try:
@@ -49,7 +46,6 @@ def set_egress_config(
     custom_type: str = "socks5",
     warp_scope: str | None = None,
 ) -> dict:
-    """Save the active egress configuration."""
     ensure_dirs()
     if warp_scope is None or not warp_scope.strip():
         chosen_scope = get_default_warp_scope()
@@ -73,7 +69,6 @@ PROXY_INDEX_FILE = LANE_DIR / "custom_proxy_index.txt"
 
 
 def _parse_proxy_entry(raw: str, default_type: str = "socks5") -> dict | None:
-    """Parse one ``[scheme://][user:pass@]host:port`` proxy entry."""
     from urllib.parse import unquote
 
     text = raw.strip()
@@ -128,7 +123,6 @@ def _parse_proxy_entry(raw: str, default_type: str = "socks5") -> dict | None:
 
 
 def parse_proxy_specs(raw: str, default_type: str = "socks5") -> list[dict]:
-    """Parse a comma/semicolon/space/newline delimited proxy pool."""
     import re
 
     entries = re.split(r"[,;\s\n\r]+", (raw or "").strip())
@@ -151,7 +145,6 @@ def parse_proxy_specs(raw: str, default_type: str = "socks5") -> list[dict]:
 
 
 def parse_proxy_list(raw: str) -> list[tuple[str, int]]:
-    """Parse comma, semicolon, space, or newline delimited proxies."""
     return [(s["host"], s["port"]) for s in parse_proxy_specs(raw)]
 
 
@@ -166,7 +159,6 @@ def _proxy_index(total: int) -> int:
 
 
 def get_current_proxy_spec() -> dict:
-    """Return the active custom proxy entry with type and credentials."""
     cfg = get_egress_config()
     default_type = str(cfg.get("custom_type", "socks5")).lower()
     specs = parse_proxy_specs(
@@ -176,7 +168,6 @@ def get_current_proxy_spec() -> dict:
 
 
 def get_current_custom_proxy() -> tuple[str, int, int, int]:
-    """Return (host, port, current_index, total_count)."""
     cfg = get_egress_config()
     default_type = str(cfg.get("custom_type", "socks5")).lower()
     specs = parse_proxy_specs(
@@ -188,7 +179,6 @@ def get_current_custom_proxy() -> tuple[str, int, int, int]:
 
 
 def rotate_custom_proxy() -> tuple[bool, str]:
-    """Rotate to the next working proxy node in the custom proxy pool."""
     ensure_dirs()
     cfg = get_egress_config()
     default_type = str(cfg.get("custom_type", "socks5")).lower()
@@ -212,7 +202,7 @@ def rotate_custom_proxy() -> tuple[bool, str]:
             f"{spec['host']}:{spec['port']}"
         )
 
-    # Verify each candidate through the proxy itself before reporting success.
+
     from ouc_common import get_egress_ip
 
     for step in range(1, len(specs)):
@@ -235,11 +225,6 @@ def rotate_custom_proxy() -> tuple[bool, str]:
 
 
 def advance_custom_proxy() -> dict:
-    """Move to the next proxy node without a blocking reachability test.
-
-    Request-path failover has to stay fast. ``rotate_custom_proxy`` keeps the
-    verification that the Next Node button needs; routers use this instead.
-    """
     ensure_dirs()
     cfg = get_egress_config()
     default_type = str(cfg.get("custom_type", "socks5")).lower()
@@ -273,7 +258,6 @@ def open_http_proxy_tunnel(
     username: str = "",
     password: str = "",
 ) -> socket.socket:
-    """Connect to an upstream HTTP proxy and negotiate CONNECT tunnel."""
     s = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
     try:
         auth = _basic_auth_header(username, password) if username else ""
@@ -305,7 +289,6 @@ def open_http_proxy_tunnel(
 
 
 def open_multi_egress_upstream(host: str, port: int, warp_fallback_fn) -> socket.socket:
-    """Route an outbound connection according to the active egress mode with auto-healing and failover."""
     cfg = get_egress_config()
     mode = cfg.get("mode", "warp")
 
@@ -366,7 +349,7 @@ def open_multi_egress_upstream(host: str, port: int, warp_fallback_fn) -> socket
                     )
                 except Exception as e:
                     last_err = e
-                    # Some proxies are configured with the wrong scheme.
+
                     try:
                         return open_http_proxy_tunnel(
                             host,
@@ -379,7 +362,7 @@ def open_multi_egress_upstream(host: str, port: int, warp_fallback_fn) -> socket
                         )
                     except Exception:
                         pass
-            # If current node failed and we have more nodes, advance pool to next node
+
             if len(specs) > 1:
                 advance_custom_proxy()
 
@@ -393,5 +376,5 @@ def open_multi_egress_upstream(host: str, port: int, warp_fallback_fn) -> socket
                 pass
         raise ConnectionError(f"All proxies in pool failed (last error: {last_err})")
 
-    # Default: Cloudflare WARP IPv6 socket binding
+
     return warp_fallback_fn(host, port)

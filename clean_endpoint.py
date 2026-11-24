@@ -1,5 +1,3 @@
-"""Clean Cloudflare WARP endpoint switcher for restricted countries."""
-
 from __future__ import annotations
 
 import platform
@@ -10,7 +8,7 @@ import time
 from ouc_common import find_warp_cli, run_warp, warp_status
 
 KNOWN_CLEAN_ENDPOINTS = (
-    # Standard Cloudflare WireGuard (Port 2408)
+
     "162.159.192.1:2408",
     "162.159.192.2:2408",
     "162.159.193.1:2408",
@@ -20,20 +18,20 @@ KNOWN_CLEAN_ENDPOINTS = (
     "188.114.97.1:2408",
     "188.114.98.1:2408",
     "188.114.99.1:2408",
-    # Alternative Port 500 (IPsec IKE — universally unblocked by ISPs)
+
     "162.159.192.1:500",
     "162.159.193.1:500",
     "188.114.96.1:500",
     "188.114.97.1:500",
-    # Alternative Port 4500 (IPsec NAT-T — bypasses UDP 2408 filtering)
+
     "162.159.192.1:4500",
     "162.159.193.1:4500",
     "188.114.96.1:4500",
     "188.114.97.1:4500",
-    # Alternative Port 1701 (L2TP / Anycast bypass)
+
     "162.159.192.1:1701",
     "162.159.193.1:1701",
-    # High-port Cloudflare WireGuard endpoints
+
     "162.159.192.1:854",
     "162.159.193.1:854",
     "162.159.192.1:880",
@@ -42,7 +40,6 @@ KNOWN_CLEAN_ENDPOINTS = (
 
 
 def test_endpoint_latency(endpoint: str, timeout: float = 1.5) -> float | None:
-    """Measure round-trip latency to a Cloudflare WireGuard endpoint in milliseconds."""
     host, _, _ = endpoint.rpartition(":")
     host = (host or endpoint).strip()
     is_win = platform.system().lower() == "windows"
@@ -62,7 +59,7 @@ def test_endpoint_latency(endpoint: str, timeout: float = 1.5) -> float | None:
     except Exception:
         pass
 
-    # Fallback to TCP ping if ICMP is dropped by local policy
+
     t0 = time.perf_counter()
     try:
         with socket.create_connection((host, 80), timeout=timeout):
@@ -72,13 +69,11 @@ def test_endpoint_latency(endpoint: str, timeout: float = 1.5) -> float | None:
 
 
 def set_custom_endpoint(endpoint: str) -> tuple[bool, str]:
-    """Force Cloudflare WARP client to connect via a specific endpoint IP:PORT."""
     warp_bin = find_warp_cli()
     if not warp_bin:
         return False, "Cloudflare warp-cli.exe not found."
 
-    # Ensure WireGuard protocol is active to avoid MASQUE HTTP/3 MITM errors (CF_HAPPY_EYEBALLS_MITM_FAILURE).
-    # Only set protocol if not already WireGuard, to prevent unnecessary tunnel teardown.
+
     try:
         from ouc_common import ensure_warp_protocol
         ensure_warp_protocol("wireguard", warp_bin=warp_bin)
@@ -94,7 +89,7 @@ def set_custom_endpoint(endpoint: str) -> tuple[bool, str]:
             time.sleep(0.8)
             conn, _, raw = warp_status(warp_bin, force=True)
             raw_low = (raw or "").lower()
-            # "unstable" only means elevated latency; traffic still flows.
+
             if conn and "unable" not in raw_low and "mitm" not in raw_low:
                 return True, f"Cloudflare WARP endpoint connected to {endpoint} (WireGuard)."
         detail = (raw or "").strip()
@@ -106,7 +101,6 @@ def set_custom_endpoint(endpoint: str) -> tuple[bool, str]:
 
 
 def reset_custom_endpoint() -> tuple[bool, str]:
-    """Reset Cloudflare WARP endpoint to official default with WireGuard protocol."""
     warp_bin = find_warp_cli()
     if not warp_bin:
         return False, "Cloudflare warp-cli.exe not found."
@@ -135,7 +129,6 @@ def reset_custom_endpoint() -> tuple[bool, str]:
 
 
 def auto_heal_warp_endpoint(timeout: float = 1.0) -> tuple[bool, str]:
-    """Benchmark clean endpoints concurrently and connect to the fastest available one."""
     from concurrent.futures import ThreadPoolExecutor
 
     results: list[tuple[float, str]] = []

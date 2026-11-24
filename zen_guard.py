@@ -1,5 +1,3 @@
-"""Watches OpenCode's log for quota walls and rotates the active egress."""
-
 from __future__ import annotations
 
 import json
@@ -9,7 +7,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# Ensure local script and bundled directories are resolvable
+
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
@@ -37,24 +35,22 @@ COOLDOWN_SECONDS = 75
 MAX_HOP_TRIES = 4
 BLACKLIST_MAX = 200
 MAX_READ_BYTES = 4_000_000
-# Loop protection: if the limit comes back this soon after a new IP, that IP
-# didn't help. The pause is short because WARP's /64 blocks are shared and the
-# next one is often fine.
+
+
 REWALL_SECONDS = 180
 FAILED_HOPS_MAX = 2
 BACKOFF_SECONDS = 2 * 60
-# A hop that could not be confirmed is not worth retrying every cooldown:
-# each attempt reconnects WARP and cuts live streams.
+
+
 ROTATION_RETRY_SECONDS = 10 * 60
-# Confirmed new IPv6 addresses that still hit the free wall mean the allowance
-# is not following the IP. Stop rotating until it resets at 00:00 UTC.
+
+
 FREE_WALL_HOPS_MAX = 2
 HEARTBEAT_FILE = GUARD_LOG_FILE.parent / "heartbeat.txt"
 PENDING_MAX_AGE = 30 * 60
 
 
 def _heartbeat() -> None:
-    """Cheap liveness signal the app checks; a running but hung guard stops writing this."""
     try:
         HEARTBEAT_FILE.write_text(str(int(time.time())), encoding="utf-8")
     except Exception:
@@ -108,7 +104,6 @@ def _save_state(state: dict) -> None:
 
 
 def _resumable(state: dict) -> list[str]:
-    """Chats that hit the limit and haven't had a 'continue' since the last new IP."""
     last_hop = float(state.get("last_ok_hop", 0) or 0)
     resumed = state.get("resumed") or {}
     return [sid for sid in (state.get("pending") or {}) if float(resumed.get(sid, 0) or 0) < last_hop]
@@ -121,11 +116,10 @@ def _prune(state: dict) -> None:
 
 
 def _dispatch_auto_resume(state: dict) -> None:
-    """After a new IP: send 'continue' to every chat that hit the limit, not just the latest one."""
     try:
         from auto_resume import resume_active_session, is_auto_resume_enabled, clear_opencode_free_limit
 
-        # Always clear client-side free-limit locks immediately upon rotation
+
         clear_opencode_free_limit()
 
         sids = _resumable(state)
@@ -144,17 +138,12 @@ def _dispatch_auto_resume(state: dict) -> None:
 
 
 def _next_utc_midnight(now: int) -> int:
-    """Return the next 00:00 UTC, when the gateway's free allowance resets."""
     stamp = datetime.fromtimestamp(now, timezone.utc)
     reset = (stamp + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return int(reset.timestamp())
 
 
 def _note_wall(state: dict, now: int) -> bool:
-    """Track walls that return right after a new IP and pause rotation when it's clearly a loop.
-
-    Returns True while auto-rotation is paused (the caller should not rotate or resume).
-    """
     backoff_until = int(state.get("backoff_until", 0) or 0)
     if backoff_until and now >= backoff_until:
         state["backoff_until"] = 0
@@ -185,7 +174,7 @@ def _note_wall(state: dict, now: int) -> bool:
                 f"(failed attempt {state['failed_hops']} of {FAILED_HOPS_MAX})",
             )
     elif last_hop:
-        # The previous IP lasted long enough: this isn't a rotation loop.
+
         state["failed_hops"] = 0
 
     free_wall = int(state.get("last_free_wall", 0) or 0)
@@ -248,7 +237,6 @@ def _is_burnt(state: dict, addr: str) -> bool:
 
 
 def _read_new_log_bytes(state: dict) -> tuple[bool, list[str]]:
-    """(wall seen since the last offset?, session IDs of the chats that hit it)."""
     if not OPENCODE_LOG_FILE.is_file():
         return False, []
     try:
@@ -320,7 +308,7 @@ def _read_new_log_bytes(state: dict) -> tuple[bool, list[str]]:
 def _rotate(state: dict, warp_bin: str | None) -> bool:
     now = int(time.time())
 
-    # Detect active egress mode
+
     mode = "warp"
     try:
         from proxy_chain import get_egress_config
@@ -328,9 +316,9 @@ def _rotate(state: dict, warp_bin: str | None) -> bool:
     except Exception:
         pass
 
-    # 1. Tor Network mode: rotate Tor circuit to get a new exit node IP
+
     if mode == "tor":
-        append_log(GUARD_LOG_FILE, "wall detected in Tor mode — rotating circuit for fresh exit identity")
+        append_log(GUARD_LOG_FILE, "wall detected in Tor mode - rotating circuit for fresh exit identity")
         try:
             from tor_manager import rotate_tor_circuit
             ok, msg = rotate_tor_circuit()
@@ -347,9 +335,9 @@ def _rotate(state: dict, warp_bin: str | None) -> bool:
             append_log(GUARD_LOG_FILE, f"Tor rotation error: {exc}")
             return False
 
-    # 2. Custom Proxy mode: cycle proxy node in pool
+
     if mode == "custom":
-        append_log(GUARD_LOG_FILE, "wall detected in Custom Proxy mode — cycling proxy node")
+        append_log(GUARD_LOG_FILE, "wall detected in Custom Proxy mode - cycling proxy node")
         try:
             from proxy_chain import rotate_custom_proxy
             ok, msg = rotate_custom_proxy()
@@ -369,7 +357,7 @@ def _rotate(state: dict, warp_bin: str | None) -> bool:
             _save_state(state)
             return False
 
-    # 3. WARP / Clean Endpoint mode: rotate IPv6 /64 subnet
+
     if not warp_bin:
         append_log(GUARD_LOG_FILE, "wall detected but warp-cli is not installed for WARP rotation")
         return False
@@ -380,7 +368,7 @@ def _rotate(state: dict, warp_bin: str | None) -> bool:
         or str(state.get("current", ""))
     )
     old_prefix = normalize_v6_64(old_v6)
-    append_log(GUARD_LOG_FILE, f"wall detected — rotating WARP /64 (was: {old_v6 or '?'})")
+    append_log(GUARD_LOG_FILE, f"wall detected - rotating WARP /64 (was: {old_v6 or '?'})")
     _blacklist_add(state, old_v6)
     _save_state(state)
 
@@ -405,14 +393,14 @@ def _rotate(state: dict, warp_bin: str | None) -> bool:
             if _is_burnt(state, cand):
                 append_log(
                     GUARD_LOG_FILE,
-                    f"try {attempt}: cloudflare returned a blacklisted /64 ({cand}) — again",
+                    f"try {attempt}: cloudflare returned a blacklisted /64 ({cand}) - again",
                 )
                 continue
             new_v6 = cand
             break
 
         if not new_v6:
-            append_log(GUARD_LOG_FILE, "everything blacklisted — recycling oldest block")
+            append_log(GUARD_LOG_FILE, "everything blacklisted - recycling oldest block")
             cand = hop_once(
                 warp_bin,
                 avoid_prefixes=set(),
@@ -442,9 +430,8 @@ def _rotate(state: dict, warp_bin: str | None) -> bool:
         return True
 
     if same_address:
-        # Don't send "continue" on the same limited IP: that is exactly the loop users saw.
-        # last_ok_hop is deliberately left alone so the next wall is not treated as
-        # a fresh IP (and so no resume is sent here).
+
+
         state["failed_hops"] = int(state.get("failed_hops", 0) or 0) + 1
         if state["failed_hops"] >= FAILED_HOPS_MAX:
             state["backoff_until"] = now + BACKOFF_SECONDS
@@ -467,7 +454,7 @@ def _rotate(state: dict, warp_bin: str | None) -> bool:
     _save_state(state)
     append_log(
         GUARD_LOG_FILE,
-        f"rotation failed — no confirmed new IPv6 egress. Pausing retries for "
+        f"rotation failed - no confirmed new IPv6 egress. Pausing retries for "
         f"{ROTATION_RETRY_SECONDS // 60} min so the tunnel is not reconnected in a loop.",
     )
     return False
@@ -513,14 +500,14 @@ def main() -> int:
                 if _note_wall(state, now):
                     continue
             elif int(state.get("backoff_until", 0) or 0) > now:
-                # Still paused: leave the wall queued for after the break.
+
                 continue
 
             last_hop = int(state.get("last_hop", 0) or 0)
             last_ok = int(state.get("last_ok_hop", 0) or 0)
             seen = int(state.get("wall_seen", 0) or 0)
             if seen and seen <= last_ok:
-                # The wall came from the session that was already rotated.
+
                 for sid in list(state.get("pending") or {}):
                     state.setdefault("resumed", {})[sid] = last_ok
                     (state.get("pending") or {}).pop(sid, None)
@@ -537,14 +524,13 @@ def main() -> int:
                     state["wall_pending"] = True
                     _save_state(state)
             else:
-                # Only continue other tabs when the last hop really produced a
-                # new IP. A failed hop or one that stayed on the same /64 must
-                # not send 'continue' on the old, limited address.
+
+
                 fresh_ip = wall and last_ok >= last_hop
                 resumable = _resumable(state) if fresh_ip else []
                 if resumable:
-                    # Other tabs that were cut off by the same wall arrived after
-                    # the IP change; the new IP is fresh, so continue them too.
+
+
                     append_log(
                         GUARD_LOG_FILE,
                         f"{len(resumable)} more chat(s) hit the limit around the last IP change "
@@ -556,7 +542,7 @@ def main() -> int:
                     if now - last_log >= 60:
                         append_log(
                             GUARD_LOG_FILE,
-                            f"wall queued — waiting out cooldown ({age}s < {COOLDOWN_SECONDS}s)",
+                            f"wall queued - waiting out cooldown ({age}s < {COOLDOWN_SECONDS}s)",
                         )
                         state["last_wait_log"] = now
                         _save_state(state)
