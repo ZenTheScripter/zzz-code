@@ -4,7 +4,6 @@ ZzZ Code is a modified distribution of the **Opencode Unlimited** control stack
 (`ZenTheScripters`), which orchestrates Cloudflare WARP, IPv6 identity rotation and the
 local OpenCode Desktop/CLI daemon on Windows.
 
-- Upstream project: Opencode Unlimited v3.0, by ZenTheScripter (ZenZenitoZeno)
 - Upstream license: GNU General Public License v3.0 — the `LICENSE` file in this
   repository is the upstream copy and is not modified
 - This repository: GPL-3.0-or-later, as required by the upstream license
